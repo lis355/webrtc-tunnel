@@ -19,11 +19,57 @@
 			"type": "node",
 			"runtimeArgs": [],
 			"request": "launch",
-			"name": "node",
+			"name": "node.develop",
 			"skipFiles": [
 				"<node_internals>/**"
 			],
-			"program": "${workspaceFolder}/node.js",
+			"program": "${workspaceFolder}/node.develop.js",
+			"console": "integratedTerminal"
+		},
+		{
+			"type": "node",
+			"runtimeArgs": [],
+			"request": "launch",
+			"name": "node.cli-client",
+			"skipFiles": [
+				"<node_internals>/**"
+			],
+			"program": "${workspaceFolder}/node.cli.js",
+			"console": "integratedTerminal",
+			"args": [
+				"-i",
+				"8080",
+				"--transport",
+				"tcp",
+				"localhost:8081"
+			]
+		},
+		{
+			"type": "node",
+			"runtimeArgs": [],
+			"request": "launch",
+			"name": "node.cli-server",
+			"skipFiles": [
+				"<node_internals>/**"
+			],
+			"program": "${workspaceFolder}/node.cli.js",
+			"console": "integratedTerminal",
+			"args": [
+				"-o",
+				"-t",
+				"tcp",
+				"8081"
+			]
+		},
+		{
+			"type": "node",
+			"runtimeArgs": [],
+			"request": "launch",
+			"name": "node.tests",
+			"skipFiles": [
+				"<node_internals>/**"
+			],
+			"program": "${workspaceFolder}/node.tests.js",
 			"console": "integratedTerminal"
 		},
 		{
