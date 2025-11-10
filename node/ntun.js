@@ -8,16 +8,12 @@ import socks from "socksv5";
 
 import * as bufferSocket from "./bufferSocket.js";
 
-const isDevelopment = Boolean(process.env.VSCODE_INJECTION &&
-	process.env.VSCODE_INSPECTOR_OPTIONS);
-
 const DEVELOPMENT_FLAGS = {
 	stringHash: true,
 	logConnectionMultiplexerMessages: true,
-	logPrintHexData: false
+	logPrintHexData: false,
+	logPrintPeriodicallyStatus: true
 };
-
-if (!isDevelopment) Object.keys(DEVELOPMENT_FLAGS).forEach(flag => DEVELOPMENT_FLAGS[flag] = false);
 
 function log(...args) {
 	console.log(`[${new Date().toISOString()}]:`, ...args);
@@ -98,6 +94,12 @@ class Connection {
 			.on("data", this.handleSocketMultiplexerOnData.bind(this));
 
 		this.connectionMultiplexer.start();
+
+		if (logPrintPeriodicallyStatus) {
+			this.logPrintPeriodicallyStatusInterval = setInterval(() => {
+				log("Connection", this.constructor.name, this.connections.size, Array.from(this.connections.values()).map(c => c.socket.readyState).join(","));
+			}, 1000);
+		}
 	}
 
 	async stop() {
@@ -111,6 +113,10 @@ class Connection {
 
 		this.connectionMultiplexer.stop();
 		this.connectionMultiplexer = null;
+
+		if (logPrintPeriodicallyStatus) {
+			this.logPrintPeriodicallyStatusInterval = clearInterval(this.logPrintPeriodicallyStatusInterval);
+		}
 	}
 
 	sendSocketMultiplexerConnect(connectionId, destinationHost, destinationPort) {
