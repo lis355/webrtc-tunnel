@@ -39,7 +39,7 @@ async function run() {
 
 	await new Promise(resolve => setTimeout(resolve, 1000));
 
-	// await exec("curl -s -x socks5://127.0.0.1:8080 http://jdam.am:8302");
+	await exec("curl -s -x socks5://127.0.0.1:8080 http://jdam.am:8302");
 	await exec("curl -s -x socks5://127.0.0.1:8080 https://jdam.am/api/ip");
 
 	process.exit(0);

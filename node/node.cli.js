@@ -36,13 +36,13 @@ async function run() {
 
 		node.inputConnection = new ntun.inputConnections.Socks5InputConnection(node, { port: args.input });
 
-		log("Input connection:", "Socks5InputConnection", "created");
+		log("Input connection", node.inputConnection.constructor.name, "created");
 	}
 
 	if (args.output) {
 		node.outputConnection = new ntun.outputConnections.InternetOutputConnection(node);
 
-		log("Output connection:", "InternetOutputConnection", "created");
+		log("Output connection", node.outputConnection.constructor.name, "created");
 	}
 
 	if (!args.transport ||
@@ -60,8 +60,6 @@ async function run() {
 						port > 65535) throw new Error("Invalid transport port");
 
 					node.transport = new ntun.transports.TCPBufferSocketClientTransport(host, port);
-
-					log("Transport:", "TCPBufferSocketClientTransport", "created");
 				} catch (_) {
 					throw new Error("Invalid transport URL");
 				}
@@ -71,8 +69,6 @@ async function run() {
 					args.transport[1] > 65535) throw new Error("Invalid transport port");
 
 				node.transport = new ntun.transports.TCPBufferSocketServerTransport(args.transport[1]);
-
-				log("Transport:", "TCPBufferSocketServerTransport", "created");
 			}
 
 			break;
@@ -87,16 +83,12 @@ async function run() {
 				}
 
 				node.transport = new ntun.transports.WebSocketBufferSocketClientTransport(url.hostname, url.port);
-
-				log("Transport:", "WebSocketBufferSocketClientTransport", "created");
 			} else if (node.outputConnection) {
 				if (!Number.isFinite(args.transport[1]) ||
 					args.transport[1] < 0 ||
 					args.transport[1] > 65535) throw new Error("Invalid transport port");
 
 				node.transport = new ntun.transports.WebSocketBufferSocketServerTransport(args.transport[1]);
-
-				log("Transport:", "WebSocketBufferSocketServerTransport", "created");
 			}
 
 			break;
@@ -106,14 +98,16 @@ async function run() {
 			throw new Error("Invalid transport");
 	}
 
+	log("Transport", node.transport.constructor.name, "created");
+
 	node.transport
 		.on("connected", () => {
-			log("Transport:", "connected");
+			log("Transport", node.transport.constructor.name, "connected");
 
 			node.start();
 		})
 		.on("closed", () => {
-			log("Transport:", "closed");
+			log("Transport", node.transport.constructor.name, "closed");
 
 			node.stop();
 		});

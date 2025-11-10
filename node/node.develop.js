@@ -53,7 +53,7 @@ async function run() {
 	serverNode.outputConnection = new ntun.outputConnections.InternetOutputConnection(serverNode);
 	serverNode.transport = serverTransport;
 
-	const clientTransport = new ntun.transports.TCPBufferSocketClientTransport(transportHost, transportPort);//, "jdam.am", 8303);
+	const clientTransport = new ntun.transports.TCPBufferSocketClientTransport(transportHost, transportPort);
 	const clientNode = new ntun.Node();
 	clientNode.inputConnection = new ntun.inputConnections.Socks5InputConnection(clientNode, { port: socks5InputConnectionPort });
 	clientNode.transport = clientTransport;
