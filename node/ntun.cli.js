@@ -1,8 +1,10 @@
 import figlet from "figlet";
 import parser from "yargs-parser";
 
+import { WebRTCPeerServerTransport, WebRTCPeerClientTransport } from "./transports/WebRTCPeerServerTransport.js";
 import log from "./utils/log.js";
 import ntun from "./ntun.js";
+import vk from "./vk.js";
 
 import info from "./package.json" with { type: "json" };
 
@@ -87,6 +89,22 @@ async function run() {
 				if (!checkPort(args.transport[1])) throw new Error("Invalid transport port");
 
 				node.transport = new ntun.transports.WebSocketBufferSocketServerTransport(args.transport[1]);
+			}
+
+			break;
+		}
+		case "vk-webrtc": {
+			let joinId;
+			try {
+				joinId = vk.getJoinId(args.transport[1]);
+			} catch (_) {
+				throw new Error("Invalid vk call joinId or join link");
+			}
+
+			if (node.inputConnection) {
+				node.transport = new WebRTCPeerClientTransport(joinId);
+			} else if (node.outputConnection) {
+				node.transport = new WebRTCPeerServerTransport(joinId);
 			}
 
 			break;

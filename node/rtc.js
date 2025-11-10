@@ -1,12 +1,10 @@
 import { config as dotenv } from "dotenv-flow";
-import mri from "mri";
 import wrtc from "wrtc";
 
+import log from "./utils/log.js";
 import WebRTCPeer from "../browser/src/common/WebRTCPeer.js";
 
 dotenv();
-
-const args = mri(process.argv.slice(2));
 
 const isDevelopment = Boolean(process.env.VSCODE_INJECTION &&
 	process.env.VSCODE_INSPECTOR_OPTIONS);
@@ -15,16 +13,8 @@ function now() {
 	return new Date().toISOString();
 }
 
-let iceServers;
-if (isDevelopment) {
-	iceServers = process.env.DEVELOP_WEB_RTC_SERVERS;
-} else {
-	if (args._.length < 1) throw new Error("Please provide ice servers configuration");
-
-	iceServers = args._[0];
-}
-
-iceServers = JSON.parse(iceServers);
+const simpleSignalServerUrl = process.env.DEVELOP_SIMPLE_SIGNAL_SERVER_URL;
+const iceServers = JSON.parse(process.env.DEVELOP_WEB_RTC_SERVERS);
 
 const webRTCPeerOptions = {
 	iceServers,
@@ -44,7 +34,7 @@ function createOfferPeer() {
 				objs[1] = WebRTCPeer.arrayBufferToBuffer(objs[1]).toString();
 			}
 
-			console.log("OFFER LOG", ...objs);
+			log("OFFER LOG", ...objs);
 		})
 		.on("connected", () => {
 			offerPeer.pingInterval = setInterval(() => {
@@ -58,7 +48,7 @@ function createOfferPeer() {
 			offerPeer.pingInterval = clearInterval(offerPeer.pingInterval);
 		})
 		.on("message", message => {
-			// console.log("offer handle message: ", WebRTCPeer.arrayBufferToBuffer(message).toString());
+			// log("offer handle message: ", WebRTCPeer.arrayBufferToBuffer(message).toString());
 		});
 
 	return offerPeer;
@@ -75,14 +65,14 @@ function createAnswerPeer() {
 				objs[1] = WebRTCPeer.arrayBufferToBuffer(objs[1]).toString();
 			}
 
-			console.log("ANSWER LOG", ...objs);
+			log("ANSWER LOG", ...objs);
 		})
 		.on("connected", () => {
 		})
 		.on("disconnected", () => {
 		})
 		.on("message", message => {
-			// console.log("answer handle message: ", WebRTCPeer.arrayBufferToBuffer(message).toString());
+			// log("answer handle message: ", WebRTCPeer.arrayBufferToBuffer(message).toString());
 
 			const messageToSend = "answer pong " + (answerPeer.counter = (answerPeer.counter || 0) + 1).toString() + " " + now();
 
@@ -92,26 +82,23 @@ function createAnswerPeer() {
 	return answerPeer;
 }
 
-// const SIMPLE_SIGNAL_SERVER_PORT_URL = "http://localhost:8260";
-const SIMPLE_SIGNAL_SERVER_PORT_URL = "http://jdam.am:8260";
-
 async function main() {
 	if (process.argv[2] === "offer") {
-		console.log("mode offer");
+		log("mode offer");
 
 		const offerPeer = createOfferPeer();
 
 		const sdpOfferBase64 = await offerPeer.createOffer();
 
-		await fetch(SIMPLE_SIGNAL_SERVER_PORT_URL + "/offer", {
+		await fetch(simpleSignalServerUrl + "/offer", {
 			method: "POST",
 			body: sdpOfferBase64
 		});
 
-		console.log("offer created");
+		log("offer created");
 
 		const waitForAnswer = async () => {
-			const response = await fetch(SIMPLE_SIGNAL_SERVER_PORT_URL + "/answer", {
+			const response = await fetch(simpleSignalServerUrl + "/answer", {
 				method: "GET"
 			});
 
@@ -119,7 +106,7 @@ async function main() {
 				const sdpAnswerBase64 = await response.text();
 				await offerPeer.setAnswer(sdpAnswerBase64);
 
-				console.log("answer settled");
+				log("answer settled");
 			} else {
 				setTimeout(waitForAnswer, 1000);
 			}
@@ -127,12 +114,12 @@ async function main() {
 
 		waitForAnswer();
 	} else if (process.argv[2] === "answer") {
-		console.log("mode answer");
+		log("mode answer");
 
 		const answerPeer = createAnswerPeer();
 
 		const waitForOffer = async () => {
-			const response = await fetch(SIMPLE_SIGNAL_SERVER_PORT_URL + "/offer", {
+			const response = await fetch(simpleSignalServerUrl + "/offer", {
 				method: "GET"
 			});
 
@@ -140,12 +127,12 @@ async function main() {
 				const sdpOfferBase64 = await response.text();
 				const sdpAnswerBase64 = await answerPeer.createAnswer(sdpOfferBase64);
 
-				await fetch(SIMPLE_SIGNAL_SERVER_PORT_URL + "/answer", {
+				await fetch(simpleSignalServerUrl + "/answer", {
 					method: "POST",
 					body: sdpAnswerBase64
 				});
 
-				console.log("answer created");
+				log("answer created");
 			} else {
 				setTimeout(waitForOffer, 1000);
 			}
@@ -153,7 +140,7 @@ async function main() {
 
 		waitForOffer();
 	} else {
-		// console.log("mode simple test without signal server");
+		// log("mode simple test without signal server");
 
 		// const offerPeer = createOfferPeer();
 		// const answerPeer = createAnswerPeer();
@@ -162,29 +149,29 @@ async function main() {
 		// const sdpAnswerBase64 = await answerPeer.createAnswer(sdpOfferBase64);
 		// await offerPeer.setAnswer(sdpAnswerBase64);
 
-		console.log("mode simple test via signal server");
+		log("mode simple test via signal server");
 
 		const offerPeer = createOfferPeer();
 		const answerPeer = createAnswerPeer();
 
 		const sdpOffer = await offerPeer.createOffer();
 
-		await fetch(SIMPLE_SIGNAL_SERVER_PORT_URL + "/offer", {
+		await fetch(simpleSignalServerUrl + "/offer", {
 			method: "POST",
 			body: sdpOffer
 		});
 
-		let response = await fetch(SIMPLE_SIGNAL_SERVER_PORT_URL + "/offer", {
+		let response = await fetch(simpleSignalServerUrl + "/offer", {
 			method: "GET"
 		});
 
 		let sdp = await response.text();
-		await fetch(SIMPLE_SIGNAL_SERVER_PORT_URL + "/answer", {
+		await fetch(simpleSignalServerUrl + "/answer", {
 			method: "POST",
 			body: await answerPeer.createAnswer(sdp)
 		});
 
-		response = await fetch(SIMPLE_SIGNAL_SERVER_PORT_URL + "/answer", {
+		response = await fetch(simpleSignalServerUrl + "/answer", {
 			method: "GET"
 		});
 

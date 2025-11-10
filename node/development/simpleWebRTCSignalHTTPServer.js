@@ -1,7 +1,7 @@
 import express from "express";
 import parser from "yargs-parser";
 
-import log from "./utils/log.js";
+import log from "../utils/log.js";
 
 const argv = process.argv.slice(2);
 const args = parser(argv);
@@ -76,7 +76,7 @@ app.options(/(.*)/, (req, res) => {
 	return res.sendStatus(200);
 });
 
-const port = args._[0] || 8260;
+const port = args._[0] || 8030;
 app.listen(port, () => {
 	log(`Simple signal server listening on port ${port}`);
 });

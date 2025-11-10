@@ -2,6 +2,7 @@
 	"name": "webrtc-tunnel-browser",
 	"version": "1.0.0",
 	"private": true,
+	"type": "module",
 	"dependencies": {
 		"lightweight-charts": "^4.2.1",
 		"normalize.css": "^8.0.1",

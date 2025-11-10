@@ -8,22 +8,11 @@
 			"type": "node",
 			"runtimeArgs": [],
 			"request": "launch",
-			"name": "rtc",
+			"name": "ntun.development",
 			"skipFiles": [
 				"<node_internals>/**"
 			],
-			"program": "${workspaceFolder}/rtc.js",
-			"console": "integratedTerminal"
-		},
-		{
-			"type": "node",
-			"runtimeArgs": [],
-			"request": "launch",
-			"name": "node.develop",
-			"skipFiles": [
-				"<node_internals>/**"
-			],
-			"program": "${workspaceFolder}/node.develop.js",
+			"program": "${workspaceFolder}/development/ntun.development.js",
 			"console": "integratedTerminal"
 		},
 		{
@@ -76,6 +65,27 @@
 			"type": "node",
 			"runtimeArgs": [],
 			"request": "launch",
+			"name": "WebRTCServer.development",
+			"skipFiles": [
+				"<node_internals>/**"
+			],
+			"program": "${workspaceFolder}/development/WebRTCServer.development.js",
+			"console": "integratedTerminal"
+		},
+		{
+			"type": "node",
+			"runtimeArgs": [],
+			"request": "launch",
+			"name": "rtc",
+			"skipFiles": [
+				"<node_internals>/**"
+			],
+			"program": "${workspaceFolder}/rtc.js",
+			"console": "integratedTerminal"
+		},
+		{
+			"type": "node",
+			"request": "launch",
 			"name": "vk",
 			"skipFiles": [
 				"<node_internals>/**"
@@ -85,16 +95,15 @@
 		},
 		{
 			"type": "node",
-			"runtimeArgs": [],
 			"request": "launch",
-			"name": "WebRTC-simpleSignal",
+			"name": "develop-signal-server",
 			"skipFiles": [
 				"<node_internals>/**"
 			],
-			"program": "${workspaceFolder}/simpleSignal.js",
+			"program": "${workspaceFolder}/development/simpleWebRTCSignalHTTPServer.js",
 			"console": "integratedTerminal",
 			"args": [
-				"8080",
+				"8030",
 			]
 		}
 	]

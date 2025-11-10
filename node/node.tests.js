@@ -1,33 +1,6 @@
-import childProcess from "node:child_process";
+import exec from "./development/exec.js";
 
 async function run() {
-	async function exec(str) {
-		return new Promise((resolve, reject) => {
-			const child = childProcess.exec(str);
-			child.stdout
-				.on("data", data => {
-					data.toString().split("\n").filter(Boolean).forEach(line => {
-						console.log("[" + str + "]", line.toString().trim());
-					});
-				});
-
-			child.stderr
-				.on("data", data => {
-					data.toString().split("\n").filter(Boolean).forEach(line => {
-						console.error("[" + str + "]", line.toString().trim());
-					});
-				});
-
-			child
-				.on("error", error => {
-					return reject(error);
-				})
-				.on("close", () => {
-					return resolve();
-				});
-		});
-	}
-
 	await exec("curl -s http://jdam.am:8302");
 	await exec("curl -s https://jdam.am/api/ip");
 

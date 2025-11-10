@@ -11,8 +11,8 @@ import log from "./utils/log.js";
 
 const DEVELOPMENT_FLAGS = {
 	stringHash: false,
-	logConnectionMultiplexerMessages: false,
-	logPrintHexData: false,
+	logConnectionMultiplexerMessages: true,
+	logPrintHexData: true,
 	logPrintPeriodicallyStatus: false
 };
 

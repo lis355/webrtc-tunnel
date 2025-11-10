@@ -7,17 +7,17 @@
 	"scripts": {},
 	"dependencies": {
 		"dotenv-flow": "^4.1.0",
-		"express": "^5.1.0",
 		"figlet": "^1.9.3",
 		"msgpack5": "^6.0.2",
-		"node-fetch": "^3.3.2",
-		"socks-proxy-agent": "^8.0.5",
 		"socksv5": "^0.0.6",
 		"wrtc": "^0.4.7",
 		"ws": "^8.18.3",
 		"yargs-parser": "^22.0.0"
 	},
 	"devDependencies": {
-		"eslint": "^9.26.0"
+		"eslint": "^9.26.0",
+		"express": "^5.1.0",
+		"node-fetch": "^3.3.2",
+		"socks-proxy-agent": "^8.0.5"
 	}
 }
