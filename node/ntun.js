@@ -418,52 +418,35 @@ class Transport extends EventEmitter {
 	}
 }
 
-class TCPBufferSocketServerTransport extends Transport {
+class BufferSocketTransport extends Transport {
+	enhanceSocket(socket) {
+		return bufferSocket.enhanceSocket(socket);
+	}
+
+	destroySocket(socket) { }
+}
+
+class BufferSocketServerTransport extends BufferSocketTransport {
 	constructor(port) {
 		super();
 
 		this.port = port;
+
+		this.handleServerOnConnection = this.handleServerOnConnection.bind(this);
 	}
+
+	createServer() { }
+	destroyServer() { }
 
 	start() {
 		super.start();
 
-		log("Transport", "TCPBufferSocketServerTransport", "starting");
+		log("Transport", this.constructor.name, "starting");
 
-		this.server = net.createServer();
+		this.createServer();
 
 		this.server
-			.on("connection", socket => {
-				if (this.socket) {
-					log("Transport", "TCPBufferSocketServerTransport", "server already has a current transport connected socket");
-
-					// drop other connection
-					socket.destroy();
-				} else {
-					this.socket = bufferSocket.enhanceSocket(socket);
-
-					log("Transport", "TCPBufferSocketServerTransport", "connected", this.socket.localAddress, this.socket.localPort, "<-->", this.socket.remoteAddress, this.socket.remotePort);
-
-					this.socket
-						.on("error", error => {
-							let errorMessage = error.message;
-							if (error.code === "ECONNREFUSED") errorMessage = "connection refused";
-							else if (error.code === "ECONNRESET") errorMessage = "connection reset";
-							else if (error.code === "ETIMEDOUT") errorMessage = "connection timeout";
-
-							log("Transport", "TCPBufferSocketServerTransport", "error", errorMessage);
-						})
-						.on("close", () => {
-							log("Transport", "TCPBufferSocketServerTransport", "closed", this.socket.remoteAddress, this.socket.remotePort);
-
-							this.socket = null;
-						});
-				}
-			});
-
-		this.server.listen(this.port, ALL_INTERFACES, () => {
-			log("Transport", "TCPBufferSocketServerTransport", "listening", this.port);
-		});
+			.on("connection", this.handleServerOnConnection);
 	}
 
 	stop() {
@@ -471,16 +454,65 @@ class TCPBufferSocketServerTransport extends Transport {
 
 		log("Transport", "TCPBufferSocketServerTransport", "stopping");
 
-		if (this.socket) this.socket.destroy();
+		if (this.socket) this.destroySocket(this.socket);
 
-		this.server.close();
+		this.server
+			.off("connection", this.handleServerOnConnection);
+
+		this.destroyServer();
 		this.server = null;
+	}
+
+	handleServerOnConnection(socket) {
+		if (this.socket) {
+			log("Transport", this.constructor.name, "server already has a current transport connected socket");
+
+			// drop other connection
+			socket.destroy();
+		} else {
+			this.socket = this.enhanceSocket(socket);
+
+			log("Transport", this.constructor.name, "connected", this.socket.localAddress, this.socket.localPort, "<-->", this.socket.remoteAddress, this.socket.remotePort);
+
+			this.socket
+				.on("error", error => {
+					let errorMessage = error.message;
+					if (error.code === "ECONNREFUSED") errorMessage = "connection refused";
+					else if (error.code === "ECONNRESET") errorMessage = "connection reset";
+					else if (error.code === "ETIMEDOUT") errorMessage = "connection timeout";
+
+					log("Transport", this.constructor.name, "error", errorMessage);
+				})
+				.on("close", () => {
+					log("Transport", this.constructor.name, "closed", this.socket.remoteAddress, this.socket.remotePort);
+
+					this.socket = null;
+				});
+		}
+	}
+}
+
+class TCPBufferSocketServerTransport extends BufferSocketServerTransport {
+	createServer() {
+		this.server = net.createServer();
+
+		this.server.listen(this.port, ALL_INTERFACES, () => {
+			log("Transport", this.constructor.name, "listening", `${this.server.address().address}:${this.server.address().port}`);
+		});
+	}
+
+	destroyServer() {
+		this.server.close();
+	}
+
+	destroySocket(socket) {
+		socket.destroy();
 	}
 }
 
 const TRANSPORT_CONNECTION_TIMEOUT = 5 * 1000;
 
-class TCPBufferSocketClientTransport extends Transport {
+class BufferSocketClientTransport extends BufferSocketTransport {
 	constructor(host, port) {
 		super();
 
@@ -490,10 +522,13 @@ class TCPBufferSocketClientTransport extends Transport {
 		this.attemptToConnect = this.attemptToConnect.bind(this);
 	}
 
+	createSocket() { }
+	destroySocket() { }
+
 	start() {
 		super.start();
 
-		log("Transport", "TCPBufferSocketClientTransport", "starting");
+		log("Transport", this.constructor.name, "starting");
 
 		this.connecting = true;
 		this.attemptToConnectTimeout = setTimeout(this.attemptToConnect, 0);
@@ -502,7 +537,7 @@ class TCPBufferSocketClientTransport extends Transport {
 	stop() {
 		super.stop();
 
-		log("Transport", "TCPBufferSocketClientTransport", "stopping");
+		log("Transport", this.constructor.name, "stopping");
 
 		if (this.connecting) {
 			this.attemptToConnectTimeout = clearTimeout(this.attemptToConnectTimeout);
@@ -511,16 +546,17 @@ class TCPBufferSocketClientTransport extends Transport {
 
 		if (this.socket) {
 			this.socketDestroyed = true;
-			this.socket.destroy();
+			this.destroySocket(this.socket);
+			this.socket = null;
 		}
 	}
 
 	attemptToConnect() {
 		if (!this.connecting) return;
 
-		log("Transport", "TCPBufferSocketClientTransport", "attempting to connect");
+		log("Transport", this.constructor.name, "attempting to connect");
 
-		const socket = bufferSocket.enhanceSocket(net.connect(this.port, this.host));
+		const socket = this.enhanceSocket(this.createSocket());
 		socket
 			.on("error", error => {
 				let errorMessage = error.message;
@@ -528,17 +564,17 @@ class TCPBufferSocketClientTransport extends Transport {
 				else if (error.code === "ECONNRESET") errorMessage = "connection reset";
 				else if (error.code === "ETIMEDOUT") errorMessage = "connection timeout";
 
-				log("Transport", "TCPBufferSocketClientTransport", "error", errorMessage);
+				log("Transport", this.constructor.name, "error", errorMessage);
 			})
 			.on("connect", () => {
 				this.socket = socket;
 
 				this.connecting = false;
 
-				log("Transport", "TCPBufferSocketClientTransport", "connected", this.socket.localAddress, this.socket.localPort, "<-->", this.socket.remoteAddress, this.socket.remotePort);
+				log("Transport", this.constructor.name, "connected", this.socket.localAddress, this.socket.localPort, "<-->", this.socket.remoteAddress, this.socket.remotePort);
 			})
 			.on("close", () => {
-				if (this.socket) log("Transport", "TCPBufferSocketClientTransport", "closed", this.socket.remoteAddress, this.socket.remotePort);
+				if (this.socket) log("Transport", this.constructor.name, "closed", this.socket.remoteAddress, this.socket.remotePort);
 
 				this.socket = null;
 
@@ -548,99 +584,70 @@ class TCPBufferSocketClientTransport extends Transport {
 				}
 
 				const connectionAttemptTimeout = this.connecting ? TRANSPORT_CONNECTION_TIMEOUT : 0;
-				if (this.connecting) log("Transport", "TCPBufferSocketClientTransport", "waiting connection attempt timeout", connectionAttemptTimeout);
+				if (this.connecting) log("Transport", this.constructor.name, "waiting connection attempt timeout", connectionAttemptTimeout);
 				if (!this.connecting) this.connecting = true;
 				this.attemptToConnectTimeout = setTimeout(this.attemptToConnect, connectionAttemptTimeout);
 			});
 	}
 }
 
-class WebSocketBufferSocketTransport extends Transport {
-	enhanceWebSocket(webSocket) {
-		webSocket.sendBuffer = buffer => webSocket.send(buffer);
-		webSocket.end = () => webSocket.close();
-		webSocket.on("message", message => webSocket.emit("buffer", message));
+class TCPBufferSocketClientTransport extends BufferSocketClientTransport {
+	createSocket() {
+		return net.connect(this.port, this.host);
+	}
 
-		webSocket.localAddress = webSocket._socket.localAddress;
-		webSocket.localPort = webSocket._socket.localPort;
-		webSocket.remoteAddress = webSocket._socket.remoteAddress;
-		webSocket.remotePort = webSocket._socket.remotePort;
+	destroySocket() {
+		this.socket.destroy();
+	}
+
+	destroySocket(socket) {
+		socket.destroy();
 	}
 }
 
-class WebSocketBufferSocketServerTransport extends WebSocketBufferSocketTransport {
-	constructor(port) {
-		super();
+function enhanceWebSocket(webSocket) {
+	webSocket.sendBuffer = buffer => webSocket.send(buffer);
+	webSocket.end = () => webSocket.close();
+	webSocket.on("open", () => webSocket.emit("connect"));
+	webSocket.on("message", message => webSocket.emit("buffer", message));
 
-		this.port = port;
+	Object.defineProperty(webSocket, "localAddress", { get: () => webSocket._socket.localAddress });
+	Object.defineProperty(webSocket, "localPort", { get: () => webSocket._socket.localPort });
+	Object.defineProperty(webSocket, "remoteAddress", { get: () => webSocket._socket.remoteAddress });
+	Object.defineProperty(webSocket, "remotePort", { get: () => webSocket._socket.remotePort });
+
+	return webSocket;
+}
+
+class WebSocketBufferSocketServerTransport extends BufferSocketServerTransport {
+	createServer() {
+		this.server = new ws.WebSocketServer({ host: ALL_INTERFACES, port: this.port });
 	}
 
-	start() {
-		super.start();
-
-		this.server = new ws.WebSocketServer({ host: ALL_INTERFACES, port });
-
-		this.server
-			.on("connection", webSocket => {
-				if (this.socket) {
-					log("Connection", "WebSocketBufferSocketServerTransport", "server already has a current transport connected socket");
-
-					// drop other connection
-					webSocket.destroy();
-				} else {
-					this.socket = this.enhanceWebSocket(webSocket);
-
-					log("Connection", "WebSocketBufferSocketServerTransport", "connected", this.socket.localAddress, this.socket.localPort, "<-->", this.socket.remoteAddress, this.socket.remotePort);
-
-					webSocket
-						.on("close", () => {
-							log("Connection", "WebSocketBufferSocketServerTransport", "closed", this.socket.remoteAddress, this.socket.remotePort);
-
-							this.socket = null;
-						});
-				}
-			});
-	}
-
-	stop() {
-		super.stop();
-
-		if (this.socket) this.socket.destroy();
-
+	destroyServer() {
 		this.server.close();
-		this.server = null;
+	}
+
+	destroySocket() {
+		this.socket.terminate();
+	}
+
+	enhanceSocket(webSocket) {
+		return enhanceWebSocket(webSocket);
 	}
 }
 
-class WebSocketBufferSocketClientTransport extends WebSocketBufferSocketTransport {
-	constructor(host, port) {
-		super();
-
-		this.host = host;
-		this.port = port;
+class WebSocketBufferSocketClientTransport extends BufferSocketClientTransport {
+	createSocket() {
+		return new ws.WebSocket(`ws://${this.host}:${this.port}`);
 	}
 
-	start() {
-		super.start();
-
-		const webSocket = new ws.WebSocket(`ws://${host}:${port}`);
-		webSocket
-			.on("connect", () => {
-				this.socket = this.enhanceWebSocket(webSocket);
-
-				log("Transport", "WebSocketBufferSocketClientTransport", "connected", this.socket.localAddress, this.socket.localPort, "<-->", this.socket.remoteAddress, this.socket.remotePort);
-			})
-			.on("close", () => {
-				log("Transport", "WebSocketBufferSocketClientTransport", "closed", this.socket.remoteAddress, this.socket.remotePort);
-
-				this.socket = null;
-			});
+	destroySocket() {
+		this.socket.terminate();
 	}
 
-	stop() {
-		super.stop();
-
-		if (this.socket) this.socket.destroy();
+	enhanceSocket(webSocket) {
+		return enhanceWebSocket(webSocket);
 	}
 }
 

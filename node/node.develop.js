@@ -47,13 +47,29 @@ async function run() {
 	const transportPort = 8081;
 	const transportHost = "127.0.0.1";
 	const socks5InputConnectionPort = 8080;
+	const transport = "webSocket";
 
-	const serverTransport = new ntun.transports.TCPBufferSocketServerTransport(transportPort);
+	let serverTransportClass;
+	let clientTransportClass;
+	switch (transport) {
+		case "tcp":
+			serverTransportClass = ntun.transports.TCPBufferSocketServerTransport;
+			clientTransportClass = ntun.transports.TCPBufferSocketClientTransport;
+			break;
+		case "webSocket":
+			serverTransportClass = ntun.transports.WebSocketBufferSocketServerTransport;
+			clientTransportClass = ntun.transports.WebSocketBufferSocketClientTransport;
+			break;
+		default:
+			throw new Error("Invalid transport");
+	}
+
+	const serverTransport = new serverTransportClass(transportPort);
 	const serverNode = new ntun.Node();
 	serverNode.outputConnection = new ntun.outputConnections.InternetOutputConnection(serverNode);
 	serverNode.transport = serverTransport;
 
-	const clientTransport = new ntun.transports.TCPBufferSocketClientTransport(transportHost, transportPort);
+	const clientTransport = new clientTransportClass(transportHost, transportPort);
 	const clientNode = new ntun.Node();
 	clientNode.inputConnection = new ntun.inputConnections.Socks5InputConnection(clientNode, { port: socks5InputConnectionPort });
 	clientNode.transport = clientTransport;
