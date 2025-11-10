@@ -95,7 +95,7 @@ class Connection {
 
 		this.connectionMultiplexer.start();
 
-		if (logPrintPeriodicallyStatus) {
+		if (DEVELOPMENT_FLAGS.logPrintPeriodicallyStatus) {
 			this.logPrintPeriodicallyStatusInterval = setInterval(() => {
 				log("Connection", this.constructor.name, this.connections.size, Array.from(this.connections.values()).map(c => c.socket.readyState).join(","));
 			}, 1000);
@@ -114,7 +114,7 @@ class Connection {
 		this.connectionMultiplexer.stop();
 		this.connectionMultiplexer = null;
 
-		if (logPrintPeriodicallyStatus) {
+		if (DEVELOPMENT_FLAGS.logPrintPeriodicallyStatus) {
 			this.logPrintPeriodicallyStatusInterval = clearInterval(this.logPrintPeriodicallyStatusInterval);
 		}
 	}
