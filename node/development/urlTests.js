@@ -4,11 +4,10 @@ import fetch from "node-fetch";
 import exec from "./exec.js";
 
 export default async function urlTests(socks5InputConnectionPort) {
-	await exec(`curl -s -x socks5://127.0.0.1:${socks5InputConnectionPort} http://jdam.am:8302`);
-	return;
-	await exec(`curl -s -x socks5://127.0.0.1:${socks5InputConnectionPort} https://jdam.am/api/ip`);
+	const { stdoutString: externalIp } = await exec("curl -s http://jdam.am:8302");
 
-	const { stdoutString: externalIp } = await exec("curl -s https://jdam.am/api/ip");
+	await exec(`curl -s -x socks5://127.0.0.1:${socks5InputConnectionPort} http://jdam.am:8302`);
+	await exec(`curl -s -x socks5://127.0.0.1:${socks5InputConnectionPort} https://jdam.am/api/ip`);
 
 	const urls = [
 		"http://jdam.am:8302",

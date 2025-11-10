@@ -12,7 +12,7 @@ import log from "./utils/log.js";
 const DEVELOPMENT_FLAGS = {
 	stringHash: false,
 	logConnectionMultiplexerMessages: true,
-	logPrintHexData: true,
+	logPrintHexData: false,
 	logPrintPeriodicallyStatus: false
 };
 
@@ -454,7 +454,11 @@ class BufferSocketServerTransport extends BufferSocketTransport {
 
 		log("Transport", this.constructor.name, "stopping");
 
-		if (this.socket) this.destroySocket(this.socket);
+		if (this.socket) {
+			this.socketDestroyedByStopCalled = true;
+			this.destroySocket(this.socket);
+			this.socket = null;
+		}
 
 		this.server
 			.off("connection", this.handleServerOnConnection);
@@ -470,6 +474,8 @@ class BufferSocketServerTransport extends BufferSocketTransport {
 			// drop other connection
 			socket.destroy();
 		} else {
+			this.socketDestroyedByStopCalled = false;
+
 			this.socket = this.enhanceSocket(socket);
 
 			log("Transport", this.constructor.name, "connected", this.socket.localAddress, this.socket.localPort, "<-->", this.socket.remoteAddress, this.socket.remotePort);
@@ -523,7 +529,6 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 	}
 
 	createSocket() { }
-	destroySocket() { }
 
 	start() {
 		super.start();
@@ -545,7 +550,7 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 		}
 
 		if (this.socket) {
-			this.socketDestroyed = true;
+			this.socketDestroyedByStopCalled = true;
 			this.destroySocket(this.socket);
 			this.socket = null;
 		}
@@ -567,6 +572,8 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 				log("Transport", this.constructor.name, "error", errorMessage);
 			})
 			.on("connect", () => {
+				this.socketDestroyedByStopCalled = false;
+
 				this.socket = socket;
 
 				this.connecting = false;
@@ -578,8 +585,8 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 
 				this.socket = null;
 
-				if (this.socketDestroyed) {
-					this.socketDestroyed = false;
+				if (this.socketDestroyedByStopCalled) {
+					this.socketDestroyedByStopCalled = false;
 					return;
 				}
 
@@ -594,10 +601,6 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 class TCPBufferSocketClientTransport extends BufferSocketClientTransport {
 	createSocket() {
 		return net.connect(this.port, this.host);
-	}
-
-	destroySocket() {
-		this.socket.destroy();
 	}
 
 	destroySocket(socket) {
@@ -628,8 +631,8 @@ class WebSocketBufferSocketServerTransport extends BufferSocketServerTransport {
 		this.server.close();
 	}
 
-	destroySocket() {
-		this.socket.terminate();
+	destroySocket(socket) {
+		socket.terminate();
 	}
 
 	enhanceSocket(webSocket) {
@@ -642,8 +645,8 @@ class WebSocketBufferSocketClientTransport extends BufferSocketClientTransport {
 		return new ws.WebSocket(`ws://${this.host}:${this.port}`);
 	}
 
-	destroySocket() {
-		this.socket.terminate();
+	destroySocket(socket) {
+		socket.terminate();
 	}
 
 	enhanceSocket(webSocket) {

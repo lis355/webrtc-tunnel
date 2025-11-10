@@ -7,27 +7,28 @@ import ntun from "../ntun.js";
 import WebRTCPeer from "../../browser/src/common/WebRTCPeer.js";
 
 const DEVELOPMENT_FLAGS = {
-	logPeer: true
+	logPeer: false
 };
 
 class TransportBufferSocketWrapper extends EventEmitter {
-	constructor({ sendBuffer, handleOnBuffer }) {
+	constructor({ sendBuffer }) {
 		super();
 
 		this.sendBuffer = sendBuffer;
-
-		this
-			.on("buffer", handleOnBuffer);
-	}
-
-	sendBuffer(buffer) {
-		this.write(buffer);
 	}
 
 	write(data) {
 		this.sendBuffer(data);
 
 		return true;
+	}
+
+	emitBuffer(buffer) {
+		this.emit("buffer", buffer);
+	}
+
+	emitClose() {
+		this.emit("close");
 	}
 }
 
@@ -55,7 +56,12 @@ class WebRTCPeerTransport extends ntun.Transport {
 
 		log("Transport", this.constructor.name, "stopping");
 
-		if (this.socket) this.destroySocket(this.socket);
+
+		if (this.socket) {
+			this.socketDestroyedByStopCalled = true;
+			this.destroySocket(this.socket);
+			this.socket = null;
+		}
 
 		this.peer
 			.off("connected", this.handlePeerOnConnect)
@@ -64,6 +70,10 @@ class WebRTCPeerTransport extends ntun.Transport {
 
 		this.peer.destroy();
 		this.peer = null;
+	}
+
+	destroySocket(socket) {
+		socket.emitClose();
 	}
 
 	createPeer() {
@@ -84,7 +94,8 @@ class WebRTCPeerTransport extends ntun.Transport {
 
 					if (event === "sendMessage" ||
 						event === "handleMessage") {
-						objs[1] = WebRTCPeer.arrayBufferToBuffer(objs[1]).toString();
+						// objs[1] = WebRTCPeer.arrayBufferToBuffer(objs[1]).toString();
+						return;
 					}
 
 					log(this.constructor.name, "peer log", ...objs);
@@ -100,6 +111,32 @@ class WebRTCPeerTransport extends ntun.Transport {
 			.on("connected", this.handlePeerOnConnect)
 			.on("disconnected", this.handlePeerOnDisconnect)
 			.on("message", this.handlePeerOnMessage);
+	}
+
+	handlePeerOnConnect() {
+		log("Transport", this.constructor.name, "peer connected");
+
+		this.socketDestroyedByStopCalled = false;
+
+		this.socket = new TransportBufferSocketWrapper({
+			sendBuffer: buffer => {
+				log("Transport", this.constructor.name, "socket sendBuffer");
+
+				this.peer.sendMessage(WebRTCPeer.bufferToArrayBuffer(buffer));
+			}
+		});
+	}
+
+	handlePeerOnDisconnect() {
+		log("Transport", this.constructor.name, "peer disconnected");
+
+		this.socket = null;
+	}
+
+	handlePeerOnMessage(message) {
+		log("Transport", this.constructor.name, "message");
+
+		this.socket.emitBuffer(WebRTCPeer.arrayBufferToBuffer(message));
 	}
 }
 
@@ -139,35 +176,6 @@ export class WebRTCPeerServerTransport extends WebRTCPeerTransport {
 			waitForAnswer();
 		});
 	}
-
-	handlePeerOnConnect() {
-		log("Transport", this.constructor.name, "peer connected");
-
-		this.socket = new TransportBufferSocketWrapper({
-			sendBuffer: buffer => {
-				log("Transport", this.constructor.name, "socket sendBuffer");
-
-				this.peer.sendMessage(WebRTCPeer.bufferToArrayBuffer(buffer));
-			},
-			handleOnBuffer: buffer => {
-				log("Transport", this.constructor.name, "socket handleOnBuffer");
-
-				this.peer.sendMessage(WebRTCPeer.arrayBufferToBuffer(buffer));
-			}
-		});
-	}
-
-	handlePeerOnDisconnect() {
-		log("Transport", this.constructor.name, "peer disconnected");
-
-		this.socket = null;
-	}
-
-	handlePeerOnMessage(message) {
-		log("Transport", this.constructor.name, "message");
-
-		this.socket.sendBuffer(WebRTCPeer.arrayBufferToBuffer(message));
-	}
 }
 
 export class WebRTCPeerClientTransport extends WebRTCPeerTransport {
@@ -201,34 +209,5 @@ export class WebRTCPeerClientTransport extends WebRTCPeerTransport {
 
 			waitForOffer();
 		});
-	}
-
-	handlePeerOnConnect() {
-		log("Transport", this.constructor.name, "peer connected");
-
-		this.socket = new TransportBufferSocketWrapper({
-			sendBuffer: buffer => {
-				log("Transport", this.constructor.name, "socket sendBuffer");
-
-				this.peer.sendMessage(WebRTCPeer.bufferToArrayBuffer(buffer));
-			},
-			handleOnBuffer: buffer => {
-				log("Transport", this.constructor.name, "socket handleOnBuffer");
-
-				this.peer.sendMessage(WebRTCPeer.arrayBufferToBuffer(buffer));
-			}
-		});
-	}
-
-	handlePeerOnDisconnect() {
-		log("Transport", this.constructor.name, "peer disconnected");
-
-		this.socket = null;
-	}
-
-	handlePeerOnMessage(message) {
-		log("Transport", this.constructor.name, "message");
-
-		this.socket.sendBuffer(WebRTCPeer.arrayBufferToBuffer(message));
 	}
 }
