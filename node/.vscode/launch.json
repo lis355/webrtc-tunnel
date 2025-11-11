@@ -65,11 +65,11 @@
 			"type": "node",
 			"runtimeArgs": [],
 			"request": "launch",
-			"name": "WebRTCServer.development",
+			"name": "WebRTCTransport.development.js",
 			"skipFiles": [
 				"<node_internals>/**"
 			],
-			"program": "${workspaceFolder}/development/WebRTCServer.development.js",
+			"program": "${workspaceFolder}/development/WebRTCTransport.development.js.js",
 			"console": "integratedTerminal"
 		},
 		{

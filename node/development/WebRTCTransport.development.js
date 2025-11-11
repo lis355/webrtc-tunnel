@@ -7,9 +7,6 @@ import ntun from "../ntun.js";
 
 dotenv();
 
-const isDevelopment = Boolean(process.env.VSCODE_INJECTION &&
-	process.env.VSCODE_INSPECTOR_OPTIONS);
-
 async function run() {
 	const iceServers = JSON.parse(process.env.DEVELOP_WEB_RTC_SERVERS);
 	const socks5InputConnectionPort = 8080;
@@ -25,6 +22,11 @@ async function run() {
 	clientNode.transport = clientTransport;
 
 	serverTransport
+		.on("error", error => {
+			log(error.message);
+
+			serverTransport.stop();
+		})
 		.on("connected", () => {
 			serverNode.start();
 		})
@@ -33,6 +35,11 @@ async function run() {
 		});
 
 	clientTransport
+		.on("error", error => {
+			log(error.message);
+
+			clientTransport.stop();
+		})
 		.on("connected", () => {
 			clientNode.start();
 		})

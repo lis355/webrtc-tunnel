@@ -1,6 +1,8 @@
 import EventEmitter from "events";
 
 export default class WebRTCPeer extends EventEmitter {
+	static ICE_GATHERING_TIMEOUT = 60 * 1000;
+
 	static arrayBufferToBuffer(arrayBuffer) {
 		return Buffer.from(arrayBuffer);
 	}
@@ -25,13 +27,12 @@ export default class WebRTCPeer extends EventEmitter {
 
 		this.options = options;
 
-		this.options.cancelGatheringCondition = this.options.cancelGatheringCondition || (peer => {
-			return peer.iceCandidates.filter(iceCandidate => iceCandidate.type === "relay").length >= peer.options.iceServers.filter(iceServer => iceServer.urls.some(url => url.startsWith("turn:"))).length;
-		});
+		this.options.iceGatheringTimeout = this.options.iceGatheringTimeout || WebRTCPeer.ICE_GATHERING_TIMEOUT;
+		this.options.cancelGatheringCondition = this.options.cancelGatheringCondition || (peer => false);
 
 		this.peerConnection = new RTCPeerConnectionClass({
 			iceServers: options.iceServers,
-			iceTransportPolicy: "relay"
+			iceTransportPolicy: options.iceTransportPolicy
 		});
 
 		this.iceCandidates = [];
@@ -55,8 +56,6 @@ export default class WebRTCPeer extends EventEmitter {
 		this.iceCandidates = [];
 	}
 
-	static ICE_GATHERING_TIMEOUT = 60 * 1000;
-
 	async waitForIceGathering() {
 		if (this.waitForIceGatheringCheckTimeout) throw new Error("ICE gathering already in progress");
 
@@ -68,8 +67,8 @@ export default class WebRTCPeer extends EventEmitter {
 			this.waitForIceGatheringCheckTimeout = setTimeout(() => {
 				this.waitForIceGatheringCheckTimeout = clearTimeout(this.waitForIceGatheringCheckTimeout);
 
-				if (this.peerConnection.iceGatheringState !== "complete") return reject(new Error("ICE gathering timed out"));
-			}, WebRTCPeer.ICE_GATHERING_TIMEOUT);
+				if (this.peerConnection.iceGatheringState !== "complete") return reject(new Error("ICE gathering time out"));
+			}, this.options.iceGatheringTimeout);
 
 			const handleIceCandidate = candidate => {
 				this.iceCandidates.push(candidate);
@@ -96,8 +95,7 @@ export default class WebRTCPeer extends EventEmitter {
 				if (event.candidate) {
 					handleIceCandidate(event.candidate);
 
-					if (this.options.cancelGatheringCondition &&
-						this.options.cancelGatheringCondition(this)) handleIceGatheringFinished();
+					if (this.options.cancelGatheringCondition(this)) handleIceGatheringFinished();
 				} else {
 					handleIceGatheringFinished();
 				}
@@ -119,13 +117,10 @@ export default class WebRTCPeer extends EventEmitter {
 
 		await this.waitForIceGathering();
 
-		const sdpOfferBase64 = btoa(JSON.stringify(this.peerConnection.localDescription));
-
-		return sdpOfferBase64;
+		return this.peerConnection.localDescription;
 	}
 
-	async createAnswer(sdpOfferBase64) {
-		const offer = JSON.parse(atob(sdpOfferBase64));
+	async createAnswer(offer) {
 		await this.peerConnection.setRemoteDescription(offer);
 
 		const answer = await this.peerConnection.createAnswer();
@@ -134,14 +129,10 @@ export default class WebRTCPeer extends EventEmitter {
 
 		await this.waitForIceGathering();
 
-		const sdpAnswerBase64 = btoa(JSON.stringify(this.peerConnection.localDescription));
-
-		return sdpAnswerBase64;
+		return this.peerConnection.localDescription;
 	}
 
-	async setAnswer(sdpAnswerBase64) {
-		const answer = JSON.parse(atob(sdpAnswerBase64));
-
+	async setAnswer(answer) {
 		await this.peerConnection.setRemoteDescription(answer);
 	}
 
