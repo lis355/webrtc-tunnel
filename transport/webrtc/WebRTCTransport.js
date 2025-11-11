@@ -1,7 +1,7 @@
 import net from "node:net";
 
-import log from "../utils/log.js";
-import ntun from "../ntun.js";
+import log from "../../utils/log.js";
+import ntun from "../../ntun.js";
 import WebRTCPeer from "./WebRTCPeer.js";
 
 const DEVELOPMENT_FLAGS = {

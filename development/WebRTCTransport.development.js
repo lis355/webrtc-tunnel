@@ -82,6 +82,12 @@ async function run() {
 			clientNode.stop();
 		});
 
+	serverTransport.start();
+
+	clientTransport.start();
+
+	await new Promise(resolve => setTimeout(resolve, 1000));
+
 	const waitForOffer = async () => {
 		log("waitForOffer");
 
@@ -98,12 +104,6 @@ async function run() {
 	};
 
 	waitForOffer();
-
-	serverTransport.start();
-
-	await new Promise(resolve => setTimeout(resolve, 1000));
-
-	clientTransport.start();
 
 	await new Promise(resolve => {
 		const check = () => {
