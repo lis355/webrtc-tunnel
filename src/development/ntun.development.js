@@ -11,7 +11,7 @@ async function run() {
 	const transportPort = 8081;
 	const transportHost = "127.0.0.1";
 	const socks5InputConnectionPort = 8080;
-	const transport = "webSocket";
+	const transport = "tcp";
 
 	let serverTransport;
 	let clientTransport;

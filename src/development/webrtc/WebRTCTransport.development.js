@@ -1,9 +1,9 @@
 import { config as dotenv } from "dotenv-flow";
 
-import urlTests from "./urlTests.js";
-import { WebRTCPeerServerTransport, WebRTCPeerClientTransport } from "../transport/webrtc/WebRTCTransport.js";
-import log from "../utils/log.js";
-import ntun from "../ntun.js";
+import urlTests from "../urlTests.js";
+import { WebRTCPeerServerTransport, WebRTCPeerClientTransport } from "../../transport/webrtc/WebRTCTransport.js";
+import log from "../../utils/log.js";
+import ntun from "../../ntun.js";
 
 dotenv();
 
@@ -83,7 +83,6 @@ async function run() {
 		});
 
 	serverTransport.start();
-
 	clientTransport.start();
 
 	await new Promise(resolve => setTimeout(resolve, 1000));

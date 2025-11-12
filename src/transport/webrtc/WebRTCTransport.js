@@ -39,11 +39,12 @@ class TransportBufferSocketWrapper extends net.Socket {
 	}
 }
 
-class WebRTCPeerTransport extends ntun.Transport {
-	constructor(iceServers) {
+export class WebRTCTransport extends ntun.Transport {
+	constructor() {
 		super();
 
-		this.iceServers = iceServers;
+		// must be settled before call start
+		this.iceServers = null;
 
 		this.handlePeerOnConnect = this.handlePeerOnConnect.bind(this);
 		this.handlePeerOnDisconnect = this.handlePeerOnDisconnect.bind(this);
@@ -67,7 +68,7 @@ class WebRTCPeerTransport extends ntun.Transport {
 
 		if (this.socket) this.socket = null;
 
-		this.destroyPeer();
+		if (this.peer) this.destroyPeer();
 	}
 
 	createPeer() {
@@ -118,13 +119,18 @@ class WebRTCPeerTransport extends ntun.Transport {
 		return this.peer.iceCandidates.some(iceCandidate => iceCandidate.type === "relay");
 	}
 
-	async startConnection() { }
+	async startConnection() {
+		this.createPeer();
+
+		this.turnServerConnectionSuccess = await this.checkTurnServerConnection();
+	}
 
 	async checkTurnServerConnection() {
 		let success = true;
 		let errorMessage;
 
 		try {
+			// remember sdpOffer to prevent second creation
 			this.sdpOffer = await this.peer.createOffer();
 		} catch (error) {
 			errorMessage = error.message;
@@ -143,17 +149,43 @@ class WebRTCPeerTransport extends ntun.Transport {
 		return success;
 	}
 
+	startOfferConnection() {
+		if (this.turnServerConnectionSuccess) {
+			this.createOffer();
+		}
+	}
+
+	startAnswerConnection() {
+		if (this.turnServerConnectionSuccess) {
+			// To prevent
+			// Failed to set remote offer sdp: Called in wrong state: kHaveLocalOffer
+			// use new peer
+
+			this.destroyPeer();
+			this.createPeer();
+		}
+	}
+
 	// connection flow
+
 	// called on server (offer peer)
-	async createOffer() { }
 	// "sdp.offer" event when created sdp offer
+	async createOffer() {
+		this.emit("sdp.offer", this.sdpOffer);
+	}
 
 	// called on client (answer peer)
-	async createAnswer(sdpOffer) { }
 	// "sdp.answer" event when created sdp answer
+	async createAnswer(sdpOffer) {
+		this.sdpAnswer = await this.peer.createAnswer(sdpOffer);
+
+		this.emit("sdp.answer", this.sdpAnswer);
+	}
 
 	// to server (offer peer)
-	async setAnswer(sdpAnswer) { }
+	async setAnswer(sdpAnswer) {
+		this.peer.setAnswer(sdpAnswer);
+	}
 
 	handlePeerOnConnect() {
 		log("Transport", this.constructor.name, "peer connected");
@@ -185,23 +217,19 @@ class WebRTCPeerTransport extends ntun.Transport {
 	}
 }
 
+class WebRTCPeerTransport extends WebRTCTransport {
+	constructor(iceServers) {
+		super();
+
+		this.iceServers = iceServers;
+	}
+}
+
 export class WebRTCPeerServerTransport extends WebRTCPeerTransport {
 	async startConnection() {
 		await super.startConnection();
 
-		this.createPeer();
-
-		if (!await this.checkTurnServerConnection()) return;
-
-		this.createOffer();
-	}
-
-	async createOffer() {
-		this.emit("sdp.offer", this.sdpOffer);
-	}
-
-	async setAnswer(sdpAnswer) {
-		this.peer.setAnswer(sdpAnswer);
+		this.startOfferConnection();
 	}
 }
 
@@ -209,21 +237,6 @@ export class WebRTCPeerClientTransport extends WebRTCPeerTransport {
 	async startConnection() {
 		await super.startConnection();
 
-		this.createPeer();
-
-		if (!await this.checkTurnServerConnection()) return;
-
-		// To prevent
-		// Failed to set remote offer sdp: Called in wrong state: kHaveLocalOffer
-		// use new peer
-
-		this.destroyPeer();
-		this.createPeer();
-	}
-
-	async createAnswer(sdpOffer) {
-		this.sdpAnswer = await this.peer.createAnswer(sdpOffer);
-
-		this.emit("sdp.answer", this.sdpAnswer);
+		this.startAnswerConnection();
 	}
 }

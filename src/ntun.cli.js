@@ -1,7 +1,7 @@
 import figlet from "figlet";
 import parser from "yargs-parser";
 
-import { WebRTCPeerServerTransport, WebRTCPeerClientTransport } from "./transports/WebRTCPeerServerTransport.js";
+import { WebRTCPeerServerTransport, WebRTCPeerClientTransport } from "./transport/webrtc/WebRTCTransport.js";
 import log from "./utils/log.js";
 import ntun from "./ntun.js";
 import vk from "./vk.js";
@@ -89,6 +89,22 @@ async function run() {
 				if (!checkPort(args.transport[1])) throw new Error("Invalid transport port");
 
 				node.transport = new ntun.transports.WebSocketBufferSocketServerTransport(args.transport[1]);
+			}
+
+			break;
+		}
+		case "webrtc": {
+			let iceServers;
+			try {
+				iceServers = JSON.parse(args.transport[1]);
+			} catch (_) {
+				throw new Error("Invalid ice servers json");
+			}
+
+			if (node.inputConnection) {
+				node.transport = new WebRTCPeerClientTransport(iceServers);
+			} else if (node.outputConnection) {
+				node.transport = new WebRTCPeerServerTransport(iceServers);
 			}
 
 			break;

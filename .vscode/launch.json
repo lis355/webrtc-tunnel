@@ -7,31 +7,51 @@
 		{
 			"type": "node",
 			"request": "launch",
-			"name": "ntun.development",
+			"name": "dev/ntun",
 			"skipFiles": [
 				"<node_internals>/**"
 			],
-			"program": "${workspaceFolder}/development/ntun.development.js",
+			"program": "${workspaceFolder}/src/development/ntun.development.js",
 			"console": "integratedTerminal"
 		},
 		{
 			"type": "node",
 			"request": "launch",
-			"name": "WebRTCTransport.development.js",
+			"name": "dev/ntun.cli",
 			"skipFiles": [
 				"<node_internals>/**"
 			],
-			"program": "${workspaceFolder}/development/WebRTCTransport.development.js",
+			"program": "${workspaceFolder}/src/development/ntun.cli.development.js",
 			"console": "integratedTerminal"
 		},
 		{
 			"type": "node",
 			"request": "launch",
-			"name": "node.cli-client",
+			"name": "dev/webrtc",
 			"skipFiles": [
 				"<node_internals>/**"
 			],
-			"program": "${workspaceFolder}/node.cli.js",
+			"program": "${workspaceFolder}/src/development/webrtc/WebRTCTransport.development.js",
+			"console": "integratedTerminal"
+		},
+		{
+			"type": "node",
+			"request": "launch",
+			"name": "dev/vk-webrtc",
+			"skipFiles": [
+				"<node_internals>/**"
+			],
+			"program": "${workspaceFolder}/src/development/vk-webrtc/vk.development.js",
+			"console": "integratedTerminal"
+		},
+		{
+			"type": "node",
+			"request": "launch",
+			"name": "ntun.cli/client",
+			"skipFiles": [
+				"<node_internals>/**"
+			],
+			"program": "${workspaceFolder}/src/node.cli.js",
 			"console": "integratedTerminal",
 			"args": [
 				"-i",
@@ -44,60 +64,17 @@
 		{
 			"type": "node",
 			"request": "launch",
-			"name": "node.cli-server",
+			"name": "ntun.cli/server",
 			"skipFiles": [
 				"<node_internals>/**"
 			],
-			"program": "${workspaceFolder}/node.cli.js",
+			"program": "${workspaceFolder}/src/node.cli.js",
 			"console": "integratedTerminal",
 			"args": [
 				"-o",
 				"-t",
 				"tcp",
 				"8081"
-			]
-		},
-		{
-			"type": "node",
-			"request": "launch",
-			"name": "node.tests",
-			"skipFiles": [
-				"<node_internals>/**"
-			],
-			"program": "${workspaceFolder}/node.tests.js",
-			"console": "integratedTerminal"
-		},
-		{
-			"type": "node",
-			"request": "launch",
-			"name": "rtc",
-			"skipFiles": [
-				"<node_internals>/**"
-			],
-			"program": "${workspaceFolder}/rtc.js",
-			"console": "integratedTerminal"
-		},
-		{
-			"type": "node",
-			"request": "launch",
-			"name": "vk",
-			"skipFiles": [
-				"<node_internals>/**"
-			],
-			"program": "${workspaceFolder}/vk.js",
-			"console": "integratedTerminal"
-		},
-		{
-			"type": "node",
-			"request": "launch",
-			"name": "develop-signal-server",
-			"skipFiles": [
-				"<node_internals>/**"
-			],
-			"program": "${workspaceFolder}/development/simpleWebRTCSignalHTTPServer.js",
-			"console": "integratedTerminal",
-			"args": [
-				"8030",
 			]
 		}
 	]
