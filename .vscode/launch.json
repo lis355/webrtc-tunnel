@@ -37,45 +37,32 @@
 		{
 			"type": "node",
 			"request": "launch",
-			"name": "dev/vk-webrtc",
+			"name": "dev/vk-calls",
 			"skipFiles": [
 				"<node_internals>/**"
 			],
-			"program": "${workspaceFolder}/src/development/vk-webrtc/vk.development.js",
+			"program": "${workspaceFolder}/src/development/vk-calls/VkCalls.development.js",
 			"console": "integratedTerminal"
 		},
 		{
 			"type": "node",
 			"request": "launch",
-			"name": "ntun.cli/client",
+			"name": "dev/vk-webrtc",
 			"skipFiles": [
 				"<node_internals>/**"
 			],
-			"program": "${workspaceFolder}/src/node.cli.js",
-			"console": "integratedTerminal",
-			"args": [
-				"-i",
-				"8080",
-				"--transport",
-				"tcp",
-				"localhost:8081"
-			]
+			"program": "${workspaceFolder}/src/development/vk-calls/VkWebRTC.development.js",
+			"console": "integratedTerminal"
 		},
 		{
 			"type": "node",
 			"request": "launch",
-			"name": "ntun.cli/server",
+			"name": "ntun.cli",
 			"skipFiles": [
 				"<node_internals>/**"
 			],
-			"program": "${workspaceFolder}/src/node.cli.js",
-			"console": "integratedTerminal",
-			"args": [
-				"-o",
-				"-t",
-				"tcp",
-				"8081"
-			]
+			"program": "${workspaceFolder}/src/ntun.cli.js",
+			"console": "integratedTerminal"
 		}
 	]
 }

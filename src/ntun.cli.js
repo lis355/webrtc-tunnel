@@ -1,14 +1,19 @@
 import figlet from "figlet";
 import parser from "yargs-parser";
 
-import { getJoinId, VkWebRTCTransport } from "./transport/vk-webrtc/VkWebRTCTransport.js";
 import { WebRTCPeerServerTransport, WebRTCPeerClientTransport } from "./transport/webrtc/WebRTCTransport.js";
+import getJoinId from "./transport/vk-calls/getJoinId.js";
 import log from "./utils/log.js";
 import ntun from "./ntun.js";
+import VkCallSignalServerTransport from "./transport/vk-calls/VkCallSignalServerTransport.js";
+import VkWebRTCTransport from "./transport/vk-calls/VkWebRTCTransport.js";
 
-import info from "./package.json" with { type: "json" };
+import info from "../package.json" with { type: "json" };
 
-const argv = process.argv.slice(2);
+// const argv = process.argv.slice(2);
+// const argv = "TEST";
+const argv = "node ./src/ntun.cli.js -o -t vk-calls \"https://vk.com/call/join/KN7WkCCyjKwlRaj-w8WIzr4SfM3WxuJvQY-auqYv5rQ\"";
+
 const args = parser(argv, {
 	alias: { input: "i", output: "o", transport: "t" },
 	array: ["transport"]
@@ -121,6 +126,22 @@ async function run() {
 				node.transport = new VkWebRTCTransport(joinId);
 			} else if (node.outputConnection) {
 				node.transport = new VkWebRTCTransport(joinId);
+			}
+
+			break;
+		}
+		case "vk-calls": {
+			let joinId;
+			try {
+				joinId = getJoinId(args.transport[1]);
+			} catch {
+				throw new Error("Invalid vk call joinId or join link");
+			}
+
+			if (node.inputConnection) {
+				node.transport = new VkCallSignalServerTransport(joinId);
+			} else if (node.outputConnection) {
+				node.transport = new VkCallSignalServerTransport(joinId);
 			}
 
 			break;

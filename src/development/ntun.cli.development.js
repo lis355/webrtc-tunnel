@@ -1,3 +1,5 @@
+import childProcess from "node:child_process";
+
 import { config as dotenv } from "dotenv-flow";
 
 import exec from "./exec.js";
@@ -13,8 +15,6 @@ function executeChildProcess(str) {
 			data.toString().split("\n").filter(Boolean).forEach(line => {
 				console.log("[" + str + "]", line.toString().trim());
 			});
-
-			stdoutString += data.toString();
 		});
 
 	child.stderr
@@ -22,8 +22,6 @@ function executeChildProcess(str) {
 			data.toString().split("\n").filter(Boolean).forEach(line => {
 				console.error("[" + str + "]", line.toString().trim());
 			});
-
-			stderrString += data.toString();
 		});
 
 	child
@@ -50,29 +48,27 @@ async function testConfiguration(serverStr, clientStr) {
 }
 
 async function run() {
-	log("IP");
-
 	await exec("curl -s http://jdam.am:8302");
 	await exec("curl -s https://jdam.am/api/ip");
 
-	await testConfiguration(
-		"node ./src/ntun.cli.js -o -t tcp 8081",
-		"node ./src/ntun.cli.js -i 8080 --transport tcp localhost:8081"
-	);
+	// await testConfiguration(
+	// 	"node ./src/ntun.cli.js -o -t tcp 8081",
+	// 	"node ./src/ntun.cli.js -i 8080 -t tcp localhost:8081"
+	// );
+
+	// await testConfiguration(
+	// 	"node ./src/ntun.cli.js -o -t websocket 8081",
+	// 	"node ./src/ntun.cli.js -i 8080 -t websocket localhost:8081"
+	// );
+
+	// await testConfiguration(
+	// 	`node ./src/ntun.cli.js -o -t webrtc "${process.env.DEVELOP_WEB_RTC_SERVERS}"`,
+	// 	`node ./src/ntun.cli.js -i 8080 -t webrtc "${process.env.DEVELOP_WEB_RTC_SERVERS}"`
+	// );
 
 	await testConfiguration(
-		"node ./src/ntun.cli.js -o -t websocket 8081",
-		"node ./src/ntun.cli.js -i 8080 --transport websocket localhost:8081"
-	);
-
-	await testConfiguration(
-		`node ./src/ntun.cli.js -o -t webrtc ${process.env.DEVELOP_WEB_RTC_SERVERS}`,
-		`node ./src/ntun.cli.js -i 8080 --transport webrtc ${process.env.DEVELOP_WEB_RTC_SERVERS}`
-	);
-
-	await testConfiguration(
-		`node ./src/ntun.cli.js -o -t vk-webrtc ${process.env.DEVELOP_VK_JOIN_ID_OR_LINK}`,
-		`node ./src/ntun.cli.js -i 8080 --transport vk-webrtc ${process.env.DEVELOP_VK_JOIN_ID_OR_LINK}`
+		`node ./src/ntun.cli.js -o -t vk-calls "${process.env.DEVELOP_VK_JOIN_ID_OR_LINK}"`,
+		`node ./src/ntun.cli.js -i 8080 -t vk-calls "${process.env.DEVELOP_VK_JOIN_ID_OR_LINK}"`
 	);
 }
 

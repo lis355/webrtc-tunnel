@@ -1,9 +1,10 @@
 import { config as dotenv } from "dotenv-flow";
 
-import { getJoinId, VkWebRTCTransport } from "../../transport/vk-webrtc/VkWebRTCTransport.js";
+import getJoinId from "../../transport/vk-calls/getJoinId.js";
 import log from "../../utils/log.js";
 import ntun from "../../ntun.js";
 import urlTests from "../urlTests.js";
+import VkWebRTCTransport from "../../transport/vk-calls/VkWebRTCTransport.js";
 
 dotenv();
 
