@@ -1,7 +1,7 @@
 import express from "express";
 import parser from "yargs-parser";
 
-import log from "../../utils/log.js";
+import { log } from "../../utils/log.js";
 
 const argv = process.argv.slice(2);
 const args = parser(argv);

@@ -9,6 +9,7 @@
 		"uninstallApp": "node ./src/scripts/uninstall.js"
 	},
 	"dependencies": {
+		"chalk": "^5.6.2",
 		"dotenv-flow": "^4.1.0",
 		"figlet": "^1.9.3",
 		"msgpack5": "^6.0.2",

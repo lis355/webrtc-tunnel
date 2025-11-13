@@ -1,7 +1,7 @@
 import { config as dotenv } from "dotenv-flow";
 import wrtc from "wrtc";
 
-import log from "./utils/log.js";
+import { log } from "./utils/log.js";
 import WebRTCPeer from "../browser/src/common/WebRTCPeer.js";
 
 dotenv();

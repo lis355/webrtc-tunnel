@@ -2,7 +2,7 @@ import { config as dotenv } from "dotenv-flow";
 
 import urlTests from "../urlTests.js";
 import { WebRTCPeerServerTransport, WebRTCPeerClientTransport } from "../../transport/webrtc/WebRTCTransport.js";
-import log from "../../utils/log.js";
+import { log } from "../../utils/log.js";
 import ntun from "../../ntun.js";
 
 dotenv();
@@ -13,7 +13,7 @@ async function run() {
 
 	const serverTransport = new WebRTCPeerServerTransport(iceServers);
 	const serverNode = new ntun.Node();
-	serverNode.outputConnection = new ntun.outputConnections.InternetOutputConnection(serverNode);
+	serverNode.outputConnection = new ntun.outputConnections.DirectOutputConnection(serverNode);
 	serverNode.transport = serverTransport;
 
 	const clientTransport = new WebRTCPeerClientTransport(iceServers);

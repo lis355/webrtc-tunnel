@@ -3,7 +3,7 @@ import childProcess from "node:child_process";
 import { config as dotenv } from "dotenv-flow";
 
 import exec from "./exec.js";
-import log from "../utils/log.js";
+import { log } from "../utils/log.js";
 import urlTests from "./urlTests.js";
 
 dotenv();

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import EventEmitter from "events";
 
 import * as ws from "ws";

@@ -3,11 +3,12 @@ import EventEmitter from "node:events";
 import net from "node:net";
 
 import * as ws from "ws";
+import chalk from "chalk";
 import msgpack from "msgpack5";
 import socks from "socksv5";
 
 import * as bufferSocket from "./bufferSocket.js";
-import log from "./utils/log.js";
+import { createLog, ifLog, LOG_LEVELS, log } from "./utils/log.js";
 
 const DEVELOPMENT_FLAGS = {
 	stringHash: false,
@@ -312,23 +313,34 @@ class ConnectionMultiplexer extends EventEmitter {
 	}
 }
 
+const nodeLog = createLog("[node]");
+
 class Node {
 	constructor() {
+		this.id = crypto.randomUUID();
 		this.inputConnection = null;
 		this.outputConnection = null;
 		this.transport = null;
+
+		if (ifLog(LOG_LEVELS.INFO)) nodeLog(chalk.green(this.id), "created");
 	}
 
 	async start() {
 		if (this.inputConnection) await this.inputConnection.start();
 		if (this.outputConnection) await this.outputConnection.start();
+
+		if (ifLog(LOG_LEVELS.INFO)) nodeLog(chalk.green(this.id), "started");
 	}
 
 	async stop() {
 		if (this.inputConnection) await this.inputConnection.stop();
 		if (this.outputConnection) await this.outputConnection.stop();
+
+		if (ifLog(LOG_LEVELS.INFO)) nodeLog(chalk.green(this.id), "stopped");
 	}
 }
+
+const socks5InputConnectionLog = createLog("[in]", "[socks5]");
 
 class Socks5InputConnection extends InputConnection {
 	async start() {
@@ -339,7 +351,7 @@ class Socks5InputConnection extends InputConnection {
 
 		await new Promise(resolve => this.server.listen(this.options.port, LOCALHOST, resolve));
 
-		log("Connection", "Socks5InputConnection", `local socks proxy server started on socks5://${LOCALHOST}:${this.options.port}`);
+		if (ifLog(LOG_LEVELS.INFO)) socks5InputConnectionLog("local socks proxy server started on", chalk.magenta(`socks5://${LOCALHOST}:${this.options.port}`));
 	}
 
 	async stop() {
@@ -348,7 +360,7 @@ class Socks5InputConnection extends InputConnection {
 		this.server.close();
 		this.server = null;
 
-		log("Connection", "Socks5InputConnection", "local socks proxy server stopped");
+		if (ifLog(LOG_LEVELS.INFO)) socks5InputConnectionLog("local socks proxy server stopped");
 	}
 
 	onSocksServerConnection(info, accept, deny) {
@@ -362,7 +374,7 @@ class Socks5InputConnection extends InputConnection {
 		const connection = this.createConnection(connectionId, socket);
 		this.handleConnectionSocketOnConnect(connection);
 
-		log("Connection", "Socks5InputConnection", `[${connection.socket.remoteAddress}:${connection.socket.remotePort}] socks proxies to [${info.dstAddr}:${info.dstPort}]`);
+		if (ifLog(LOG_LEVELS.INFO)) socks5InputConnectionLog(`[${connection.socket.remoteAddress}:${connection.socket.remotePort}] socks proxies to [${info.dstAddr}:${info.dstPort}]`);
 
 		this.sendSocketMultiplexerConnect(connectionId, info.dstAddr, info.dstPort);
 	}
@@ -372,21 +384,23 @@ class Socks5InputConnection extends InputConnection {
 	}
 }
 
-class InternetOutputConnection extends OutputConnection {
+const directOutputConnectionLog = createLog("[out]", "[direct]");
+
+class DirectOutputConnection extends OutputConnection {
 	async start() {
 		await super.start();
 
-		log("Connection", "InternetOutputConnection", "started");
+		if (ifLog(LOG_LEVELS.INFO)) directOutputConnectionLog("started");
 	}
 
 	async stop() {
 		await super.stop();
 
-		log("Connection", "InternetOutputConnection", "stopped");
+		if (ifLog(LOG_LEVELS.INFO)) directOutputConnectionLog("stopped");
 	}
 
 	handleSocketMultiplexerOnConnect(connectionId, destinationHost, destinationPort) {
-		log("Connection", "InternetOutputConnection", `output internet connection to [${destinationHost}:${destinationPort}]`);
+		if (ifLog(LOG_LEVELS.INFO)) directOutputConnectionLog(`output internet connection to [${destinationHost}:${destinationPort}]`);
 
 		const destinationSocket = net.connect(destinationPort, destinationHost);
 
@@ -501,7 +515,7 @@ class BufferSocketServerTransport extends BufferSocketTransport {
 
 			this.socket = this.enhanceSocket(socket);
 
-			log("Transport", this.constructor.name, "connected", this.socket.localAddress, this.socket.localPort, "<-->", this.socket.remoteAddress, this.socket.remotePort);
+			log("Transport", this.constructor.name, "connected", chalk.magenta(`${this.socket.localAddress}:${this.socket.localPort}`), "--", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
 		}
 	}
 
@@ -534,11 +548,11 @@ class TCPBufferSocketServerTransport extends BufferSocketServerTransport {
 		this.server
 			.on("listening", this.handleServerOnListening);
 
-		this.server.listen(this.port, ALL_INTERFACES, this.handleServerOnListening);
+		this.server.listen(this.port, ALL_INTERFACES);
 	}
 
 	handleServerOnListening() {
-		log("Transport", this.constructor.name, "listening", `${this.server.address().address}:${this.server.address().port}`);
+		log("Transport", this.constructor.name, "listening", chalk.magenta(`${this.server.address().address}:${this.server.address().port}`));
 	}
 
 	destroyServer() {
@@ -603,7 +617,7 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 
 				this.connecting = false;
 
-				log("Transport", this.constructor.name, "connected", this.socket.localAddress, this.socket.localPort, "<-->", this.socket.remoteAddress, this.socket.remotePort);
+				log("Transport", this.constructor.name, "connected", chalk.magenta(`${this.socket.localAddress}:${this.socket.localPort}`), "--", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
 			});
 	}
 
@@ -693,7 +707,7 @@ export default {
 		Socks5InputConnection
 	},
 	outputConnections: {
-		InternetOutputConnection
+		DirectOutputConnection
 	},
 	transports: {
 		BufferSocketServerTransport,

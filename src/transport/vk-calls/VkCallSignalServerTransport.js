@@ -2,7 +2,7 @@ import net from "node:net";
 
 import { getVkWebSocketSignalServerUrlByJoinId, VkWebSocketSignalServer } from "./VkWebSocketSignalServer.js";
 import ntun from "../../ntun.js";
-import log from "../../utils/log.js";
+import { log } from "../../utils/log.js";
 import symmetricStringCipher from "../../utils/symmetricStringCipher.js";
 
 class TransportBufferSocketWrapper extends net.Socket {

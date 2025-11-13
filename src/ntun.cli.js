@@ -1,7 +1,7 @@
 import figlet from "figlet";
 import parser from "yargs-parser";
 
-import log from "./utils/log.js";
+import { log } from "./utils/log.js";
 import ntun from "./ntun.js";
 
 import VkTransport from "./transport/vk-calls/VkTransport.js";
@@ -59,7 +59,7 @@ async function run() {
 	}
 
 	if (args.output) {
-		node.outputConnection = new ntun.outputConnections.InternetOutputConnection(node);
+		node.outputConnection = new ntun.outputConnections.DirectOutputConnection(node);
 
 		log("Output connection", node.outputConnection.constructor.name, "created");
 	}

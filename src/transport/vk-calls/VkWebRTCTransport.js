@@ -1,5 +1,5 @@
 import { getVkWebSocketSignalServerUrlByJoinId, VkWebSocketSignalServer } from "./VkWebSocketSignalServer.js";
-import log from "../../utils/log.js";
+import { log } from "../../utils/log.js";
 import symmetricStringCipher from "../../utils/symmetricStringCipher.js";
 import WebRTCTransport from "../webrtc/WebRTCTransport.js";
 

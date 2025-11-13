@@ -1,5 +1,7 @@
 import childProcess from "node:child_process";
 
+import { log } from "../utils/log.js";
+
 export default async function exec(str) {
 	let stdoutString = "";
 	let stderrString = "";
@@ -9,7 +11,7 @@ export default async function exec(str) {
 		child.stdout
 			.on("data", data => {
 				data.toString().split("\n").filter(Boolean).forEach(line => {
-					console.log("[" + str + "]", line.toString().trim());
+					log("[" + str + "]", line.toString().trim());
 				});
 
 				stdoutString += data.toString();
@@ -18,7 +20,7 @@ export default async function exec(str) {
 		child.stderr
 			.on("data", data => {
 				data.toString().split("\n").filter(Boolean).forEach(line => {
-					console.error("[" + str + "]", line.toString().trim());
+					error("[" + str + "]", line.toString().trim());
 				});
 
 				stderrString += data.toString();
