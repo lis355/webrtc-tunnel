@@ -4,7 +4,10 @@
 	"main": "main.js",
 	"license": "MIT",
 	"type": "module",
-	"scripts": {},
+	"scripts": {
+		"installApp": "node ./src/scripts/install.js",
+		"uninstallApp": "node ./src/scripts/uninstall.js"
+	},
 	"dependencies": {
 		"dotenv-flow": "^4.1.0",
 		"figlet": "^1.9.3",

@@ -12,7 +12,6 @@ import info from "../package.json" with { type: "json" };
 
 const argv = process.argv.slice(2);
 // const argv = "TEST";
-// const argv = "node ./src/ntun.cli.js -o -t vk-calls \"https://vk.com/call/join/KN7WkCCyjKwlRaj-w8WIzr4SfM3WxuJvQY-auqYv5rQ\"";
 
 const args = parser(argv, {
 	alias: { input: "i", output: "o", transport: "t" },
@@ -44,6 +43,8 @@ const TRANSPORT = {
 
 async function run() {
 	printLogo();
+
+	log(`NodeJS ${process.version}, OS ${process.platform}`);
 
 	const node = new ntun.Node();
 
@@ -176,4 +177,8 @@ async function run() {
 	node.transport.start();
 }
 
-run();
+run().catch(error => {
+	log(error.message);
+
+	process.exit(1);
+});
