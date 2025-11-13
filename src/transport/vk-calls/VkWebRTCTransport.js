@@ -1,7 +1,7 @@
 import { getVkWebSocketSignalServerUrlByJoinId, VkWebSocketSignalServer } from "./VkWebSocketSignalServer.js";
 import { WebRTCTransport } from "../webrtc/WebRTCTransport.js";
 import log from "../../utils/log.js";
-import symmetricStringChipher from "../../utils/symmetricStringChipher.js";
+import symmetricStringCipher from "../../utils/symmetricStringCipher.js";
 
 const DEVELOPMENT_FLAGS = {
 	logIceServers: false
@@ -127,7 +127,7 @@ export default class VkWebRTCTransport extends WebRTCTransport {
 			const senderParticipantId = message.participantId;
 			const data = message.data;
 
-			const decryptedData = symmetricStringChipher.decrypt(data);
+			const decryptedData = symmetricStringCipher.decrypt(data);
 			if (decryptedData) {
 				let sdp;
 				try {
@@ -161,14 +161,14 @@ export default class VkWebRTCTransport extends WebRTCTransport {
 	handleOnSdpOffer(sdpOffer) {
 		this.vkWebSocketSignalServer.sendCommand("custom-data", {
 			participantId: this.answerParticipantId,
-			data: symmetricStringChipher.encrypt(JSON.stringify(sdpOffer))
+			data: symmetricStringCipher.encrypt(JSON.stringify(sdpOffer))
 		});
 	}
 
 	handleOnSdpAnswer(sdpAnswer) {
 		this.vkWebSocketSignalServer.sendCommand("custom-data", {
 			participantId: this.offerParticipantId,
-			data: symmetricStringChipher.encrypt(JSON.stringify(sdpAnswer))
+			data: symmetricStringCipher.encrypt(JSON.stringify(sdpAnswer))
 		});
 	}
 }

@@ -3,7 +3,7 @@ import net from "node:net";
 import { getVkWebSocketSignalServerUrlByJoinId, VkWebSocketSignalServer } from "./VkWebSocketSignalServer.js";
 import ntun from "../../ntun.js";
 import log from "../../utils/log.js";
-import symmetricStringChipher from "../../utils/symmetricStringChipher.js";
+import symmetricStringCipher from "../../utils/symmetricStringCipher.js";
 
 class TransportBufferSocketWrapper extends net.Socket {
 	constructor() {
@@ -39,12 +39,16 @@ class TransportBufferSocketWrapper extends net.Socket {
 // Транспорт, использующий только сигнальный сервер VkWebSocketSignalServer VK
 // данные передаются посредством адресного отправления данных методом "custom-data"
 export default class VkCallSignalServerTransport extends ntun.Transport {
-	static STATE = {
+	static STATES = {
 		CONNECTING: 0,
 		CONNECTED: 1
 	};
 
-	static HANDSHAKE_MESSAGE_CONNECT = "CONNECT";
+	static MESSAGE_TYPES = {
+		CONNECT: 0,
+		ACCEPT: 1,
+		BUFFER: 2
+	};
 
 	constructor(joinId) {
 		super();
@@ -89,6 +93,11 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 	stop() {
 		super.stop();
 
+		if (this.socket) {
+			this.socket.destroy();
+			this.socket = null;
+		}
+
 		this.vkWebSocketSignalServer
 			.off("error", this.handleVkWebSocketSignalServerOnError)
 			.off("started", this.handleVkWebSocketSignalServerOnStarted)
@@ -118,40 +127,30 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 	async handleVkWebSocketSignalServerOnReady() {
 		log("Transport", this.constructor.name, "VkWebSocketSignalServer", "peerId", this.vkWebSocketSignalServer.peerId, "participantId", this.vkWebSocketSignalServer.participantId, "conversationId", this.vkWebSocketSignalServer.conversationId);
 
-		this.state = VkCallSignalServerTransport.STATE.CONNECTING;
+		this.state = VkCallSignalServerTransport.STATES.CONNECTING;
 
-		// кто зашёл вторым, т.е. в this.vkWebSocketSignalServer.connectionInfo.conversation.participants уже есть список участников
-		// тот будет оффером, и будет отправлять существущему участнику заявку
-		const firstParticipant = this.vkWebSocketSignalServer.connectionInfo.conversation.participants
+		// Поиск и синхронизация пары участников (подразумевается что только 2 участника будут использовать этот чат звонка)
+		// Алгоритм Детерминированный выбор на основе ID
+		// Участники сравнивают свои ID (например, лексикографически)
+		// Участник с "меньшим" ID всегда инициирует
+		// Участник с "большим" ID всегда ждет инициативы
+		// После получения запроса - сразу подтверждают
+
+		this.participants = {};
+
+		this.vkWebSocketSignalServer.connectionInfo.conversation.participants
 			.filter(participant => participant.id !== this.vkWebSocketSignalServer.participantId)
-			.at(0);
+			.forEach(participant => { this.participants[participant.id] = participant; });
 
-		if (firstParticipant) {
-			this.isOfferPeer = true;
-			this.isAnswerPeer = false;
-			this.myParticipantId = this.vkWebSocketSignalServer.participantId;
-			this.opponentParticipantId = firstParticipant.id;
-
-			log("Transport", this.constructor.name, "start offer connection", "opponentParticipantId", this.opponentParticipantId);
-
-			this.startOfferConnection();
-		} else {
-			this.isOfferPeer = false;
-			this.isAnswerPeer = true;
-			this.myParticipantId = this.vkWebSocketSignalServer.participantId;
-			this.opponentParticipantId = null; // узнаем в notification === "custom-data"
-
-			log("Transport", this.constructor.name, "start answer connection");
-
-			this.startAnswerConnection();
-		}
+		this.sendConnectToOpponentParticipants();
 	}
 
-	startOfferConnection() {
-		this.sendParticipantMessage(VkCallSignalServerTransport.HANDSHAKE_MESSAGE_CONNECT);
-	}
-
-	startAnswerConnection() {
+	sendConnectToOpponentParticipants() {
+		Object.values(this.participants)
+			.filter(participant => participant.id > this.vkWebSocketSignalServer.participantId)
+			.forEach(participant => {
+				this.sendMessageToParticipant(participant.id, VkCallSignalServerTransport.MESSAGE_TYPES.CONNECT);
+			});
 	}
 
 	handleVkWebSocketSignalServerOnMessage(message) {
@@ -163,91 +162,113 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 	}
 
 	handleVkWebSocketSignalServerOnNotification(message) {
-		if (message.notification === "custom-data") {
-			const senderParticipantId = message.participantId;
-			const data = message.data;
+		switch (message.notification) {
+			case "custom-data": {
+				const senderParticipantId = message.participantId;
+				const decryptedMessage = symmetricStringCipher.decrypt(message.data);
+				if (decryptedMessage) {
+					const { type, ...data } = JSON.parse(decryptedMessage);
 
-			const decryptedData = symmetricStringChipher.decrypt(data);
-			if (decryptedData) {
-				switch (this.state) {
-					case VkCallSignalServerTransport.STATE.CONNECTING: {
-						let message = decryptedData;
-
-						if (message) this.handleOnParticipantMessage(senderParticipantId, message);
-						else log("Transport", this.constructor.name, "unknown custom-data message from participant", senderParticipantId, "data", data);
-
-						break;
-					}
-					case VkCallSignalServerTransport.STATE.CONNECTED: {
-						let buffer;
-						try {
-							buffer = Buffer.from(decryptedData, "base64");
-						} catch {
-							log("Transport", this.constructor.name, "bad data decoding from participant", senderParticipantId, "data", data);
-						}
-
-						if (buffer) this.handleOnParticipantBuffer(buffer);
-						else log("Transport", this.constructor.name, "unknown custom-data message from participant", senderParticipantId, "data", data);
-
-						break;
-					}
-					default:
-						log("Transport", this.constructor.name, "unknown state", this.state);
+					this.handleOnParticipantMessage(senderParticipantId, type, data);
+				} else {
+					log("Transport", this.constructor.name, "unknown custom-data message from participant", senderParticipantId, "data", str);
 				}
 
+				break;
+			}
 
-			} else {
-				log("Transport", this.constructor.name, "unknown custom-data message from participant", senderParticipantId, "data", data);
+			case "registered-peer": {
+				if (message.participantType === "USER" &&
+					message.platform === "WEB" &&
+					message.clientType === "VK") {
+					const participantId = message.participantId;
+
+					this.participants[participantId] = { id: participantId };
+
+					if (this.state === VkCallSignalServerTransport.STATES.CONNECTING &&
+						participantId > this.vkWebSocketSignalServer.participantId) {
+						this.sendMessageToParticipant(participantId, VkCallSignalServerTransport.MESSAGE_TYPES.CONNECT);
+					}
+
+					break;
+				}
+			}
+
+			case "hungup": {
+				const participantId = message.participantId;
+
+				delete this.participants[participantId];
+
+				if (this.state = VkCallSignalServerTransport.STATES.CONNECTED &&
+					participantId === this.opponentParticipantId) {
+					this.state = VkCallSignalServerTransport.STATES.CONNECTING;
+
+					this.opponentParticipantId = null;
+
+					this.socket = null;
+
+					this.sendConnectToOpponentParticipants();
+				}
+
+				break;
 			}
 		}
 	}
 
-	handleOnParticipantMessage(participantId, message) {
-		let connected = false;
+	handleOnParticipantMessage(participantId, type, data) {
+		switch (this.state) {
+			case VkCallSignalServerTransport.STATES.CONNECTING: {
+				switch (type) {
+					case VkCallSignalServerTransport.MESSAGE_TYPES.CONNECT: {
+						if (participantId < this.vkWebSocketSignalServer.participantId &&
+							!this.opponentParticipantId) {
+							this.state = VkCallSignalServerTransport.STATES.CONNECTED;
 
-		if (this.isOfferPeer) {
-			if (message === VkCallSignalServerTransport.HANDSHAKE_MESSAGE_CONNECT &&
-				this.opponentParticipantId === participantId) {
-				connected = true;
-			} else {
-				log("Transport", this.constructor.name, "unknown participant message", participantId, message);
+							this.opponentParticipantId = participantId;
+
+							this.sendMessageToParticipant(this.opponentParticipantId, VkCallSignalServerTransport.MESSAGE_TYPES.ACCEPT);
+
+							this.socket = new TransportBufferSocketWrapper();
+						} else log("Transport", this.constructor.name, "bad logic message from participant", participantId, type, data);
+
+						break;
+					}
+					case VkCallSignalServerTransport.MESSAGE_TYPES.ACCEPT: {
+						if (participantId > this.vkWebSocketSignalServer.participantId &&
+							!this.opponentParticipantId) {
+							this.state = VkCallSignalServerTransport.STATES.CONNECTED;
+
+							this.opponentParticipantId = participantId;
+
+							this.socket = new TransportBufferSocketWrapper();
+						} else log("Transport", this.constructor.name, "bad logic message from participant", participantId, type, data);
+
+						break;
+					}
+					default: log("Transport", this.constructor.name, "bad logic message from participant", participantId, type, data);
+				}
+
+				break;
 			}
-		} else if (this.isAnswerPeer) {
-			if (message === VkCallSignalServerTransport.HANDSHAKE_MESSAGE_CONNECT) {
-				this.opponentParticipantId = participantId;
+			case VkCallSignalServerTransport.STATES.CONNECTED: {
+				switch (type) {
+					case VkCallSignalServerTransport.MESSAGE_TYPES.BUFFER: {
+						this.socket.push(Buffer.from(data.buffer, "base64"));
 
-				this.sendParticipantMessage(VkCallSignalServerTransport.HANDSHAKE_MESSAGE_CONNECT);
+						break;
+					}
+					default: log("Transport", this.constructor.name, "bad logic message from participant", participantId, type, data);
+				}
 
-				connected = true;
-			} else {
-				log("Transport", this.constructor.name, "unknown participant message", participantId, message);
+				break;
 			}
-		} else {
-			log("Transport", this.constructor.name, "unknown logic in participant message", participantId, message);
-		}
-
-		if (connected) {
-			this.state = VkCallSignalServerTransport.STATE.CONNECTED;
-
-			this.socket = new TransportBufferSocketWrapper();
 		}
 	}
 
-	handleOnParticipantBuffer(buffer) {
-		this.socket.push(buffer);
-	}
-
-	sendParticipantMessage(message) {
+	sendMessageToParticipant(participantId, type, data = {}) {
 		this.vkWebSocketSignalServer.sendCommand("custom-data", {
-			participantId: this.opponentParticipantId,
-			data: symmetricStringChipher.encrypt(message)
-		});
-	}
-
-	sendParticipantBuffer(buffer) {
-		this.vkWebSocketSignalServer.sendCommand("custom-data", {
-			participantId: this.opponentParticipantId,
-			data: symmetricStringChipher.encrypt(buffer.toString("base64"))
+			participantId,
+			data: symmetricStringCipher.encrypt(JSON.stringify({ type, ...data }))
 		});
 	}
 
@@ -262,6 +283,6 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 	}
 
 	handleSocketOnWrite(buffer) {
-		this.sendParticipantBuffer(buffer);
+		this.sendMessageToParticipant(this.opponentParticipantId, VkCallSignalServerTransport.MESSAGE_TYPES.BUFFER, { buffer: buffer.toString("base64") });
 	}
 }

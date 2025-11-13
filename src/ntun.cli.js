@@ -10,9 +10,9 @@ import VkWebRTCTransport from "./transport/vk-calls/VkWebRTCTransport.js";
 
 import info from "../package.json" with { type: "json" };
 
-// const argv = process.argv.slice(2);
+const argv = process.argv.slice(2);
 // const argv = "TEST";
-const argv = "node ./src/ntun.cli.js -o -t vk-calls \"https://vk.com/call/join/KN7WkCCyjKwlRaj-w8WIzr4SfM3WxuJvQY-auqYv5rQ\"";
+// const argv = "node ./src/ntun.cli.js -o -t vk-calls \"https://vk.com/call/join/KN7WkCCyjKwlRaj-w8WIzr4SfM3WxuJvQY-auqYv5rQ\"";
 
 const args = parser(argv, {
 	alias: { input: "i", output: "o", transport: "t" },
@@ -33,6 +33,14 @@ function checkPort(port) {
 		port >= 0 &&
 		port <= 65535;
 }
+
+const TRANSPORT = {
+	TCP: "tcp",
+	WEBSOCKET: "ws",
+	WEBRTC: "webrtc",
+	VK_WEBRTC: "vk-webrtc",
+	VK_CALLS: "vk-calls"
+};
 
 async function run() {
 	printLogo();
@@ -60,7 +68,7 @@ async function run() {
 		args.transport.length === 0) throw new Error("Transport must be specified");
 
 	switch (args.transport[0]) {
-		case "tcp": {
+		case TRANSPORT.TCP: {
 			if (node.inputConnection) {
 				try {
 					let [host, port] = args.transport[1].split(":");
@@ -79,7 +87,7 @@ async function run() {
 
 			break;
 		}
-		case "ws": {
+		case TRANSPORT.WEBSOCKET: {
 			if (node.inputConnection) {
 				try {
 					let [host, port] = args.transport[1].split(":");
@@ -98,7 +106,7 @@ async function run() {
 
 			break;
 		}
-		case "webrtc": {
+		case TRANSPORT.WEBRTC: {
 			let iceServers;
 			try {
 				iceServers = JSON.parse(args.transport[1]);
@@ -114,7 +122,7 @@ async function run() {
 
 			break;
 		}
-		case "vk-webrtc": {
+		case TRANSPORT.VK_WEBRTC: {
 			let joinId;
 			try {
 				joinId = getJoinId(args.transport[1]);
@@ -130,7 +138,7 @@ async function run() {
 
 			break;
 		}
-		case "vk-calls": {
+		case TRANSPORT.VK_CALLS: {
 			let joinId;
 			try {
 				joinId = getJoinId(args.transport[1]);

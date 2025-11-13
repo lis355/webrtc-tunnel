@@ -41,25 +41,25 @@ async function testConfiguration(serverStr, clientStr) {
 
 	await urlTests(8080);
 
-	serverProcess.kill();
-	clientProcess.kill();
+	serverProcess.kill("SIGKILL");
+	clientProcess.kill("SIGKILL");
 
-	await new Promise(resolve => setTimeout(resolve, 1000));
+	await new Promise(resolve => setTimeout(resolve, 3000));
 }
 
 async function run() {
 	await exec("curl -s http://jdam.am:8302");
 	await exec("curl -s https://jdam.am/api/ip");
 
-	// await testConfiguration(
-	// 	"node ./src/ntun.cli.js -o -t tcp 8081",
-	// 	"node ./src/ntun.cli.js -i 8080 -t tcp localhost:8081"
-	// );
+	await testConfiguration(
+		"node ./src/ntun.cli.js -o -t tcp 8081",
+		"node ./src/ntun.cli.js -i 8080 -t tcp localhost:8081"
+	);
 
-	// await testConfiguration(
-	// 	"node ./src/ntun.cli.js -o -t websocket 8081",
-	// 	"node ./src/ntun.cli.js -i 8080 -t websocket localhost:8081"
-	// );
+	await testConfiguration(
+		"node ./src/ntun.cli.js -o -t ws 8081",
+		"node ./src/ntun.cli.js -i 8080 -t ws localhost:8081"
+	);
 
 	// await testConfiguration(
 	// 	`node ./src/ntun.cli.js -o -t webrtc "${process.env.DEVELOP_WEB_RTC_SERVERS}"`,
