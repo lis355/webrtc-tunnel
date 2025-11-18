@@ -8,7 +8,7 @@ import msgpack from "msgpack5";
 import socks from "socksv5";
 
 import * as bufferSocket from "./bufferSocket.js";
-import { createLog, ifLog, LOG_LEVELS, log } from "./utils/log.js";
+import { createLog, ifLog, LOG_LEVELS } from "./utils/log.js";
 
 const DEVELOPMENT_FLAGS = {
 	stringHash: false,
@@ -92,7 +92,6 @@ class Connection extends EventEmitter {
 
 		this.connections = new Map();
 		this.connectionMultiplexer = new ConnectionMultiplexer(this.node.transport);
-		this.isTransportConnected = false;
 
 		this.workingState = WORKING_STATE.IDLE;
 
@@ -117,10 +116,12 @@ class Connection extends EventEmitter {
 		this.node.transport
 			.on("connected", this.handleOnTransportConnected)
 			.on("disconnected", this.handleOnTransportDisconnected);
+
+		if (this.node.transport.isConnected) this.handleOnTransportConnected();
 	}
 
 	emitWillStart() {
-		if (ifLog(LOG_LEVELS.INFO)) this.log("will start");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("will start");
 
 		this.emit("willStart");
 	}
@@ -134,7 +135,7 @@ class Connection extends EventEmitter {
 
 		this.workingState = WORKING_STATE.WORKING;
 
-		if (ifLog(LOG_LEVELS.INFO)) this.log("started");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("started");
 
 		this.emit("started");
 	}
@@ -164,7 +165,7 @@ class Connection extends EventEmitter {
 	}
 
 	emitWillStop() {
-		if (ifLog(LOG_LEVELS.INFO)) this.log("will stop");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("will stop");
 
 		this.emit("willStop");
 	}
@@ -176,22 +177,18 @@ class Connection extends EventEmitter {
 
 		this.workingState = WORKING_STATE.IDLE;
 
-		if (ifLog(LOG_LEVELS.INFO)) this.log("stopped");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("stopped");
 
 		this.emit("stopped");
 	}
 
 	handleOnTransportConnected() {
-		this.isTransportConnected = true;
-
 		this.subscribeOnConnectionMultiplexer();
 
 		this.connectionMultiplexer.socket = this.node.transport.socket;
 	}
 
 	handleOnTransportDisconnected() {
-		this.isTransportConnected = false;
-
 		this.unsubscribeFromConnectionMultiplexer();
 
 		this.connectionMultiplexer.socket = null;
@@ -463,7 +460,7 @@ class Node extends EventEmitter {
 	}
 
 	emitWillStart() {
-		if (ifLog(LOG_LEVELS.INFO)) this.log("will start");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("will start");
 
 		this.emit("willStart");
 	}
@@ -471,7 +468,7 @@ class Node extends EventEmitter {
 	emitStarted() {
 		this.workingState = WORKING_STATE.WORKING;
 
-		if (ifLog(LOG_LEVELS.INFO)) this.log("started");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("started");
 
 		this.emit("started");
 	}
@@ -487,7 +484,7 @@ class Node extends EventEmitter {
 	}
 
 	emitWillStop() {
-		if (ifLog(LOG_LEVELS.INFO)) this.log("will stop");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("will stop");
 
 		this.emit("willStop");
 	}
@@ -495,7 +492,7 @@ class Node extends EventEmitter {
 	emitStopped() {
 		this.workingState = WORKING_STATE.IDLE;
 
-		if (ifLog(LOG_LEVELS.INFO)) this.log("stopped");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("stopped");
 
 		this.emit("stopped");
 	}
@@ -573,7 +570,7 @@ class Socks5InputConnection extends InputConnection {
 	}
 
 	handleOnSocksServerConnection(info, accept, deny) {
-		if (!this.isTransportConnected) {
+		if (!this.node.transport.isConnected) {
 			if (ifLog(LOG_LEVELS.INFO)) this.log(`connection from [${info.srcAddr}:${info.srcPort}] with proxy to [${info.dstAddr}:${info.dstPort}] denied because transport is not connected`);
 
 			return deny();
@@ -663,7 +660,7 @@ class Transport extends EventEmitter {
 	}
 
 	emitWillStart() {
-		if (ifLog(LOG_LEVELS.INFO)) this.log("will start");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("will start");
 
 		this.emit("willStart");
 	}
@@ -671,7 +668,7 @@ class Transport extends EventEmitter {
 	emitStarted() {
 		this.workingState = WORKING_STATE.WORKING;
 
-		if (ifLog(LOG_LEVELS.INFO)) this.log("started");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("started");
 
 		this.emit("started");
 	}
@@ -685,7 +682,7 @@ class Transport extends EventEmitter {
 	}
 
 	emitWillStop() {
-		if (ifLog(LOG_LEVELS.INFO)) this.log("will stop");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("will stop");
 
 		this.emit("willStop");
 	}
@@ -693,7 +690,7 @@ class Transport extends EventEmitter {
 	emitStopped() {
 		this.workingState = WORKING_STATE.IDLE;
 
-		if (ifLog(LOG_LEVELS.INFO)) this.log("stopped");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("stopped");
 
 		this.emit("stopped");
 	}
@@ -857,13 +854,15 @@ class BufferSocketServerTransport extends BufferSocketTransport {
 	}
 
 	handleSocketOnClose() {
-		if (ifLog(LOG_LEVELS.INFO)) this.log("disconnected", this.socket.remoteAddress, this.socket.remotePort);
-
 		this.socket = null;
 	}
 
 	printConnectedLog() {
 		if (ifLog(LOG_LEVELS.INFO)) this.log("connected", chalk.magenta(`${this.socket.localAddress}:${this.socket.localPort}`), "--", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
+	}
+
+	printDisconnectedLog() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("disconnected", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
 	}
 }
 
@@ -877,7 +876,7 @@ class TCPBufferSocketServerTransport extends BufferSocketServerTransport {
 	}
 }
 
-const TRANSPORT_CONNECTION_TIMEOUT = 5 * 1000;
+const TRANSPORT_CONNECTION_TIMEOUT = 3 * 1000;
 
 class BufferSocketClientTransport extends BufferSocketTransport {
 	constructor(host, port) {
@@ -943,10 +942,6 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 	}
 
 	handleSocketOnClose() {
-		if (this.socket) {
-			if (ifLog(LOG_LEVELS.INFO)) this.log("disconnected from", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
-		}
-
 		this.socket = null;
 
 		if (this.socketDestroyedByStopCalled) {
@@ -957,7 +952,7 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 		const connectionAttemptTimeout = this.connecting ? TRANSPORT_CONNECTION_TIMEOUT : 0;
 
 		if (this.connecting) {
-			if (ifLog(LOG_LEVELS.INFO)) ("waiting connection attempt timeout", connectionAttemptTimeout);
+			if (ifLog(LOG_LEVELS.INFO)) this.log("waiting connection attempt timeout", connectionAttemptTimeout);
 		}
 
 		if (!this.connecting) this.connecting = true;
@@ -966,6 +961,10 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 
 	printConnectedLog() {
 		if (ifLog(LOG_LEVELS.INFO)) this.log("connected", chalk.magenta(`${this.socket.localAddress}:${this.socket.localPort}`), "--", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
+	}
+
+	printDisconnectedLog() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("disconnected from", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
 	}
 }
 
