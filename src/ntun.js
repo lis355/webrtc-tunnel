@@ -65,12 +65,19 @@ function int32md5XorHash(str) {
 	const hash = crypto.createHash("md5").update(str).digest();
 
 	let result = 0;
-	for (let i = 0; i < 16; i += 4) result ^= hash.readInt32BE(i);
+	for (let i = 0; i < 16; i += 4) result ^= hash.readInt32BE(i) & 0x7FFFFFFF;
 
 	return result;
 }
 
-class Connection {
+const WORKING_STATE = {
+	IDLE: "idle",
+	STARTING: "starting",
+	WORKING: "working",
+	STOPPING: "stopping"
+};
+
+class Connection extends EventEmitter {
 	static getConnectionIdBySocket(socket) {
 		return DEVELOPMENT_FLAGS.stringHash
 			? `${socket.localAddress}:${socket.localPort}--${socket.remoteAddress}:${socket.remotePort}`
@@ -78,43 +85,132 @@ class Connection {
 	}
 
 	constructor(node, options = {}) {
+		super();
+
+		this.createLog();
+
 		this.node = node;
 		this.options = options;
+
 		this.connections = new Map();
+		this.connectionMultiplexer = new ConnectionMultiplexer(this.node.transport);
+		this.isTransportConnected = false;
+
+		this.workingState = WORKING_STATE.IDLE;
+
+		this.handleOnTransportConnected = this.handleOnTransportConnected.bind(this);
+		this.handleOnTransportDisconnected = this.handleOnTransportDisconnected.bind(this);
+		this.handleSocketMultiplexerOnConnect = this.handleSocketMultiplexerOnConnect.bind(this);
+		this.handleSocketMultiplexerOnClose = this.handleSocketMultiplexerOnClose.bind(this);
+		this.handleSocketMultiplexerOnData = this.handleSocketMultiplexerOnData.bind(this);
+
+		if (ifLog(LOG_LEVELS.INFO)) this.log("created for node", chalk.green(this.node.name));
 	}
 
-	async start() {
-		this.connectionMultiplexer = new ConnectionMultiplexer(this.node.transport);
+	createLog() { throw new Error("Not implemented"); }
 
-		this.connectionMultiplexer
-			.on("connect", this.handleSocketMultiplexerOnConnect.bind(this))
-			.on("close", this.handleSocketMultiplexerOnClose.bind(this))
-			.on("data", this.handleSocketMultiplexerOnData.bind(this));
+	start() {
+		if (this.workingState !== WORKING_STATE.IDLE) throw new Error("Not in idle state");
 
-		this.connectionMultiplexer.start();
+		this.workingState = WORKING_STATE.STARTING;
 
+		this.emitWillStart();
+
+		this.node.transport
+			.on("connected", this.handleOnTransportConnected)
+			.on("disconnected", this.handleOnTransportDisconnected);
+	}
+
+	emitWillStart() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("will start");
+
+		this.emit("willStart");
+	}
+
+	emitStarted() {
 		if (DEVELOPMENT_FLAGS.logPrintPeriodicallyStatus) {
 			this.logPrintPeriodicallyStatusInterval = setInterval(() => {
-				log("Connection", this.constructor.name, this.connections.size, Array.from(this.connections.values()).map(c => c.socket.readyState).join(","));
+				this.log("Connection", this.constructor.name, this.connections.size, Array.from(this.connections.values()).map(c => c.socket.readyState).join(","));
 			}, 1000);
 		}
+
+		this.workingState = WORKING_STATE.WORKING;
+
+		if (ifLog(LOG_LEVELS.INFO)) this.log("started");
+
+		this.emit("started");
 	}
 
-	async stop() {
+	stop() {
+		if (this.workingState !== WORKING_STATE.WORKING) throw new Error("Not in working state");
+
+		this.workingState = WORKING_STATE.STOPPING;
+
+		this.emitWillStop();
+
 		for (const [connectionId, connection] of this.connections) {
-			this.sendSocketMultiplexerClose(connectionId, "ABORT");
+			this.sendSocketMultiplexerClose(connectionId, "abort");
 
 			this.deleteConnection(connection);
 
 			connection.socket.destroy();
 		}
 
-		this.connectionMultiplexer.stop();
-		this.connectionMultiplexer = null;
+		this.unsubscribeFromConnectionMultiplexer();
 
+		this.connectionMultiplexer.socket = null;
+
+		this.node.transport
+			.off("connected", this.handleOnTransportConnected)
+			.off("disconnected", this.handleOnTransportDisconnected);
+	}
+
+	emitWillStop() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("will stop");
+
+		this.emit("willStop");
+	}
+
+	emitStopped() {
 		if (DEVELOPMENT_FLAGS.logPrintPeriodicallyStatus) {
 			this.logPrintPeriodicallyStatusInterval = clearInterval(this.logPrintPeriodicallyStatusInterval);
 		}
+
+		this.workingState = WORKING_STATE.IDLE;
+
+		if (ifLog(LOG_LEVELS.INFO)) this.log("stopped");
+
+		this.emit("stopped");
+	}
+
+	handleOnTransportConnected() {
+		this.isTransportConnected = true;
+
+		this.subscribeOnConnectionMultiplexer();
+
+		this.connectionMultiplexer.socket = this.node.transport.socket;
+	}
+
+	handleOnTransportDisconnected() {
+		this.isTransportConnected = false;
+
+		this.unsubscribeFromConnectionMultiplexer();
+
+		this.connectionMultiplexer.socket = null;
+	}
+
+	subscribeOnConnectionMultiplexer() {
+		this.connectionMultiplexer
+			.on("connect", this.handleSocketMultiplexerOnConnect)
+			.on("close", this.handleSocketMultiplexerOnClose)
+			.on("data", this.handleSocketMultiplexerOnData);
+	}
+
+	unsubscribeFromConnectionMultiplexer() {
+		this.connectionMultiplexer
+			.off("connect", this.handleSocketMultiplexerOnConnect)
+			.off("close", this.handleSocketMultiplexerOnClose)
+			.off("data", this.handleSocketMultiplexerOnData);
 	}
 
 	sendSocketMultiplexerConnect(connectionId, destinationHost, destinationPort) {
@@ -135,7 +231,9 @@ class Connection {
 		const connection = this.connections.get(connectionId);
 		if (!connection) return;
 
-		if (errorMessage) log("Connection", this.constructor.name, "remote connection error", connectionId, errorMessage);
+		if (errorMessage) {
+			if (ifLog(LOG_LEVELS.DETAILED)) this.log("remote connection error", connectionId, errorMessage);
+		}
 
 		this.deleteConnection(connection);
 
@@ -191,26 +289,25 @@ class Connection {
 	}
 
 	handleConnectionSocketOnError(connection, error) {
-		log("Connection", this.constructor.name, `error [${connection.socket.remoteAddress}:${connection.socket.remotePort}]`, error.code || error.message);
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log(`error [${connection.socket.remoteAddress}:${connection.socket.remotePort}]`, error.code || error.message);
 
 		connection.errorMessage = error.code || error.message;
 	}
 
 	handleConnectionSocketOnConnect(connection) {
-		log("Connection", this.constructor.name, `connected with [${connection.socket.remoteAddress}:${connection.socket.remotePort}]`);
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log(`connected with [${connection.socket.remoteAddress}:${connection.socket.remotePort}]`);
 
 		connection.connected = true;
 	}
 
 	handleConnectionSocketOnReady(connection) {
-		log("Connection", this.constructor.name, `ready with [${connection.socket.remoteAddress}:${connection.socket.remotePort}]`);
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log(`ready with [${connection.socket.remoteAddress}:${connection.socket.remotePort}]`);
 
 		while (connection.messages.length > 0) connection.socket.write(connection.messages.shift());
-		connection.messages = [];
 	}
 
 	handleConnectionSocketOnClose(connection) {
-		log("Connection", this.constructor.name, `closed with [${connection.socket.remoteAddress}:${connection.socket.remotePort}]`);
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log(`closed with [${connection.socket.remoteAddress}:${connection.socket.remotePort}]`);
 
 		this.deleteConnection(connection);
 
@@ -228,6 +325,8 @@ class InputConnection extends Connection {
 class OutputConnection extends Connection {
 }
 
+const connectionMultiplexerLog = createLog("[multiplexer]");
+
 class ConnectionMultiplexer extends EventEmitter {
 	static MESSAGE_TYPES = {
 		CONNECT: 0,
@@ -235,20 +334,26 @@ class ConnectionMultiplexer extends EventEmitter {
 		DATA: 2
 	};
 
-	constructor(transport) {
+	constructor() {
 		super();
 
-		this.transport = transport;
+		this._socket = null;
 
-		this.handleTransportSocketOnBuffer = this.handleTransportSocketOnBuffer.bind(this);
+		this.handleSocketOnBuffer = this.handleSocketOnBuffer.bind(this);
 	}
 
-	start() {
-		this.transport.socket.on("buffer", this.handleTransportSocketOnBuffer);
+	get socket() {
+		return this._socket;
 	}
 
-	stop() {
-		this.transport.socket.off("buffer", this.handleTransportSocketOnBuffer);
+	set socket(newSocket) {
+		if (this._socket === newSocket) return;
+
+		if (this._socket) this._socket.off("buffer", this.handleSocketOnBuffer);
+
+		this._socket = newSocket;
+
+		if (this._socket) this._socket.on("buffer", this.handleSocketOnBuffer);
 	}
 
 	sendMessageConnect(connectionId, destinationHost, destinationPort) {
@@ -269,24 +374,24 @@ class ConnectionMultiplexer extends EventEmitter {
 
 		if (DEVELOPMENT_FLAGS.logConnectionMultiplexerMessages) {
 			switch (type) {
-				case ConnectionMultiplexer.MESSAGE_TYPES.CONNECT: log("ConnectionMultiplexer", "send", "CONNECT", args[0], args[1]); break;
-				case ConnectionMultiplexer.MESSAGE_TYPES.CLOSE: log("ConnectionMultiplexer", "send", "CLOSE", args[0]); break;
-				case ConnectionMultiplexer.MESSAGE_TYPES.DATA: log("ConnectionMultiplexer", "send", "DATA", args[0].length, DEVELOPMENT_FLAGS.logPrintHexData && ("\n" + getHexTable(args[0]))); break;
+				case ConnectionMultiplexer.MESSAGE_TYPES.CONNECT: connectionMultiplexerLog("send", "CONNECT", args[0], args[1]); break;
+				case ConnectionMultiplexer.MESSAGE_TYPES.CLOSE: connectionMultiplexerLog("send", "CLOSE", args[0]); break;
+				case ConnectionMultiplexer.MESSAGE_TYPES.DATA: connectionMultiplexerLog("send", "DATA", args[0].length, DEVELOPMENT_FLAGS.logPrintHexData && ("\n" + getHexTable(args[0]))); break;
 			}
 		}
 
-		this.transport.socket.sendBuffer(buffer);
+		this.socket.sendBuffer(buffer);
 	}
 
-	async handleTransportSocketOnBuffer(buffer) {
+	async handleSocketOnBuffer(buffer) {
 		const message = bufferToObject(buffer);
 		const [type, connectionId, ...args] = message;
 
 		if (DEVELOPMENT_FLAGS.logConnectionMultiplexerMessages) {
 			switch (type) {
-				case ConnectionMultiplexer.MESSAGE_TYPES.CONNECT: log("ConnectionMultiplexer", "receive", "CONNECT", args[0], args[1]); break;
-				case ConnectionMultiplexer.MESSAGE_TYPES.CLOSE: log("ConnectionMultiplexer", "receive", "CLOSE", args[0]); break;
-				case ConnectionMultiplexer.MESSAGE_TYPES.DATA: log("ConnectionMultiplexer", "receive", "DATA", args[0].length, DEVELOPMENT_FLAGS.logPrintHexData && ("\n" + getHexTable(args[0]))); break;
+				case ConnectionMultiplexer.MESSAGE_TYPES.CONNECT: connectionMultiplexerLog("receive", "CONNECT", args[0], args[1]); break;
+				case ConnectionMultiplexer.MESSAGE_TYPES.CLOSE: connectionMultiplexerLog("receive", "CLOSE", args[0]); break;
+				case ConnectionMultiplexer.MESSAGE_TYPES.DATA: connectionMultiplexerLog("receive", "DATA", args[0].length, DEVELOPMENT_FLAGS.logPrintHexData && ("\n" + getHexTable(args[0]))); break;
 			}
 		}
 
@@ -313,57 +418,169 @@ class ConnectionMultiplexer extends EventEmitter {
 	}
 }
 
-const nodeLog = createLog("[node]");
+class Node extends EventEmitter {
+	constructor(options = {}) {
+		super();
 
-class Node {
-	constructor() {
 		this.id = crypto.randomUUID();
-		this.inputConnection = null;
-		this.outputConnection = null;
+		this.options = options;
+		this.createLog();
+
+		this.connection = null;
 		this.transport = null;
 
-		if (ifLog(LOG_LEVELS.INFO)) nodeLog(chalk.green(this.id), "created");
+		this.workingState = WORKING_STATE.IDLE;
+
+		this.handleConnectionOnStarted = this.handleConnectionOnStarted.bind(this);
+		this.handleConnectionOnStopped = this.handleConnectionOnStopped.bind(this);
+
+		if (ifLog(LOG_LEVELS.INFO)) {
+			this.log("created");
+
+			if (this.name !== this.id) this.log("node id", chalk.green(this.id));
+		}
 	}
 
-	async start() {
-		if (this.inputConnection) await this.inputConnection.start();
-		if (this.outputConnection) await this.outputConnection.start();
-
-		if (ifLog(LOG_LEVELS.INFO)) nodeLog(chalk.green(this.id), "started");
+	createLog() {
+		this.log = createLog("[node]", chalk.green(this.name));
 	}
 
-	async stop() {
-		if (this.inputConnection) await this.inputConnection.stop();
-		if (this.outputConnection) await this.outputConnection.stop();
+	get name() {
+		return this.options.name || this.id;
+	}
 
-		if (ifLog(LOG_LEVELS.INFO)) nodeLog(chalk.green(this.id), "stopped");
+	start() {
+		if (this.workingState !== WORKING_STATE.IDLE) throw new Error("Not in idle state");
+		if (!this.connection) throw new Error("No connection");
+		if (!this.transport) throw new Error("No transport");
+
+		this.workingState = WORKING_STATE.STARTING;
+
+		this.emitWillStart();
+
+		this.connection
+			.on("started", this.handleConnectionOnStarted)
+			.on("stopped", this.handleConnectionOnStopped);
+
+		this.connection.start();
+	}
+
+	emitWillStart() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("will start");
+
+		this.emit("willStart");
+	}
+
+	emitStarted() {
+		this.workingState = WORKING_STATE.WORKING;
+
+		if (ifLog(LOG_LEVELS.INFO)) this.log("started");
+
+		this.emit("started");
+	}
+
+	stop() {
+		if (this.workingState !== WORKING_STATE.WORKING) throw new Error("Not in working state");
+
+		this.workingState = WORKING_STATE.STOPPING;
+
+		this.emitWillStop();
+
+		this.connection.stop();
+	}
+
+	emitWillStop() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("will stop");
+
+		this.emit("willStop");
+	}
+
+	emitStopped() {
+		this.workingState = WORKING_STATE.IDLE;
+
+		if (ifLog(LOG_LEVELS.INFO)) this.log("stopped");
+
+		this.emit("stopped");
+	}
+
+	handleConnectionOnStarted() {
+		this.emitStarted();
+	}
+
+	handleConnectionOnStopped() {
+		this.connection
+			.off("started", this.handleConnectionOnStarted)
+			.off("stopped", this.handleConnectionOnStopped);
+
+		this.emitStopped();
 	}
 }
 
-const socks5InputConnectionLog = createLog("[in]", "[socks5]");
-
 class Socks5InputConnection extends InputConnection {
-	async start() {
-		await super.start();
+	constructor(node, options) {
+		super(node, options);
 
-		this.server = socks.createServer(this.onSocksServerConnection.bind(this));
+		this.handleOnSocksServerError = this.handleOnSocksServerError.bind(this);
+		this.handleOnSocksServerConnection = this.handleOnSocksServerConnection.bind(this);
+		this.handleOnSocksServerClose = this.handleOnSocksServerClose.bind(this);
+		this.handleOnSocksServerListening = this.handleOnSocksServerListening.bind(this);
+	}
+
+	createLog() {
+		this.log = createLog("[in]", "[socks5]");
+	}
+
+	start() {
+		super.start();
+
+		this.createServer();
+	}
+
+	stop() {
+		super.stop();
+
+		this.destroyServer();
+	}
+
+	createServer() {
+		this.server = socks.createServer();
 		this.server.useAuth(socks.auth.None());
 
-		await new Promise(resolve => this.server.listen(this.options.port, LOCALHOST, resolve));
+		this.server
+			.on("error", this.handleOnSocksServerError)
+			.on("connection", this.handleOnSocksServerConnection)
+			.on("close", this.handleOnSocksServerClose)
+			.on("listening", this.handleOnSocksServerListening);
 
-		if (ifLog(LOG_LEVELS.INFO)) socks5InputConnectionLog("local socks proxy server started on", chalk.magenta(`socks5://${LOCALHOST}:${this.options.port}`));
+		this.server.listen(this.options.port, LOCALHOST);
 	}
 
-	async stop() {
-		await super.stop();
-
+	destroyServer() {
 		this.server.close();
-		this.server = null;
-
-		if (ifLog(LOG_LEVELS.INFO)) socks5InputConnectionLog("local socks proxy server stopped");
 	}
 
-	onSocksServerConnection(info, accept, deny) {
+	emitStarted() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("local socks proxy server started on", chalk.magenta(`socks5://${LOCALHOST}:${this.options.port}`));
+
+		super.emitStarted();
+	}
+
+	emitStopped() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("local socks proxy server stopped");
+
+		super.emitStopped();
+	}
+
+	handleOnSocksServerError(error) {
+		if (ifLog(LOG_LEVELS.INFO)) this.log(`local socks proxy server error ${error.message}`);
+	}
+
+	handleOnSocksServerConnection(info, accept, deny) {
+		if (!this.isTransportConnected) {
+			if (ifLog(LOG_LEVELS.INFO)) this.log(`connection from [${info.srcAddr}:${info.srcPort}] with proxy to [${info.dstAddr}:${info.dstPort}] denied because transport is not connected`);
+
+			return deny();
+		}
 
 		// TODO по хорошему, мы можем сначала попробовать законнектить удаленный сокет с dstAddr, а уже потом, при успешном соединении, вызывать accept(true)
 		// для этого нужно принимать событие, что удаленный сокет на транспорте подключился, чтобы не отправлять лишних данных сразу... но нужно ли оно это?...
@@ -374,9 +591,24 @@ class Socks5InputConnection extends InputConnection {
 		const connection = this.createConnection(connectionId, socket);
 		this.handleConnectionSocketOnConnect(connection);
 
-		if (ifLog(LOG_LEVELS.INFO)) socks5InputConnectionLog(`[${connection.socket.remoteAddress}:${connection.socket.remotePort}] socks proxies to [${info.dstAddr}:${info.dstPort}]`);
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log(`[${connection.socket.remoteAddress}:${connection.socket.remotePort}] socks proxies to [${info.dstAddr}:${info.dstPort}]`);
 
 		this.sendSocketMultiplexerConnect(connectionId, info.dstAddr, info.dstPort);
+	}
+
+	handleOnSocksServerClose() {
+		this.server
+			.off("connection", this.handleOnSocksServerConnection)
+			.off("close", this.handleOnSocksServerClose)
+			.off("listening", this.handleOnSocksServerListening);
+
+		this.server = null;
+
+		this.emitStopped();
+	}
+
+	handleOnSocksServerListening() {
+		this.emitStarted();
 	}
 
 	handleSocketMultiplexerOnConnect(connectionId, destinationHost, destinationPort) {
@@ -384,23 +616,25 @@ class Socks5InputConnection extends InputConnection {
 	}
 }
 
-const directOutputConnectionLog = createLog("[out]", "[direct]");
-
 class DirectOutputConnection extends OutputConnection {
-	async start() {
-		await super.start();
-
-		if (ifLog(LOG_LEVELS.INFO)) directOutputConnectionLog("started");
+	createLog() {
+		this.log = createLog("[out]", "[direct]");
 	}
 
-	async stop() {
-		await super.stop();
+	start() {
+		super.start();
 
-		if (ifLog(LOG_LEVELS.INFO)) directOutputConnectionLog("stopped");
+		this.emitStarted();
+	}
+
+	stop() {
+		super.stop();
+
+		this.emitStopped();
 	}
 
 	handleSocketMultiplexerOnConnect(connectionId, destinationHost, destinationPort) {
-		if (ifLog(LOG_LEVELS.INFO)) directOutputConnectionLog(`output internet connection to [${destinationHost}:${destinationPort}]`);
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log(`output internet connection to [${destinationHost}:${destinationPort}]`);
 
 		const destinationSocket = net.connect(destinationPort, destinationHost);
 
@@ -412,24 +646,83 @@ class Transport extends EventEmitter {
 	constructor() {
 		super();
 
-		this.transportSocket = null;
+		this.createLog();
+
+		this._socket = null;
+
+		this.workingState = WORKING_STATE.IDLE;
 	}
 
-	start() { }
-	stop() { }
+	createLog() { throw new Error("Not implemented"); }
+
+	start() {
+		if (this.workingState !== WORKING_STATE.IDLE) throw new Error("Not in idle state");
+
+		this.workingState = WORKING_STATE.STARTING;
+
+		this.emitWillStart();
+	}
+
+	emitWillStart() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("will start");
+
+		this.emit("willStart");
+	}
+
+	emitStarted() {
+		this.workingState = WORKING_STATE.WORKING;
+
+		if (ifLog(LOG_LEVELS.INFO)) this.log("started");
+
+		this.emit("started");
+	}
+
+	stop() {
+		if (this.workingState !== WORKING_STATE.WORKING) throw new Error("Not in working state");
+
+		this.workingState = WORKING_STATE.STOPPING;
+
+		this.emitWillStop();
+	}
+
+	emitWillStop() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("will stop");
+
+		this.emit("willStop");
+	}
+
+	emitStopped() {
+		this.workingState = WORKING_STATE.IDLE;
+
+		if (ifLog(LOG_LEVELS.INFO)) this.log("stopped");
+
+		this.emit("stopped");
+	}
 
 	get socket() {
-		return this.transportSocket;
+		return this._socket;
 	}
 
-	set socket(socket) {
-		if (this.transportSocket === socket) return;
+	set socket(newSocket) {
+		if (this._socket === newSocket) return;
 
-		if (!socket) this.emit("disconnected");
+		if (!newSocket) {
+			if (ifLog(LOG_LEVELS.INFO)) this.log("disconnected");
 
-		this.transportSocket = socket;
+			this.emit("disconnected");
+		}
 
-		if (socket) this.emit("connected");
+		this._socket = newSocket;
+
+		if (newSocket) {
+			if (ifLog(LOG_LEVELS.INFO)) this.log("connected");
+
+			this.emit("connected");
+		}
+	}
+
+	get isConnected() {
+		return Boolean(this.socket);
 	}
 }
 
@@ -469,27 +762,33 @@ class BufferSocketServerTransport extends BufferSocketTransport {
 
 		this.port = port;
 
+		this.handleServerOnClose = this.handleServerOnClose.bind(this);
+		this.handleServerOnListening = this.handleServerOnListening.bind(this);
 		this.handleServerOnConnection = this.handleServerOnConnection.bind(this);
 	}
 
 	createServer() { }
 	destroyServer() { }
 
+	startServer() {
+		this.createServer();
+		this.subscribeOnServer();
+
+		this.server.listen(this.port, ALL_INTERFACES);
+	}
+
+	closeServer() {
+		this.server.close();
+	}
+
 	start() {
 		super.start();
 
-		log("Transport", this.constructor.name, "starting");
-
-		this.createServer();
-
-		this.server
-			.on("connection", this.handleServerOnConnection);
+		this.startServer();
 	}
 
 	stop() {
 		super.stop();
-
-		log("Transport", this.constructor.name, "stopping");
 
 		if (this.socket) {
 			this.socketDestroyedByStopCalled = true;
@@ -497,25 +796,49 @@ class BufferSocketServerTransport extends BufferSocketTransport {
 			this.socket = null;
 		}
 
-		this.server
-			.off("connection", this.handleServerOnConnection);
+		this.closeServer();
+	}
 
-		this.destroyServer();
+	subscribeOnServer() {
+		this.server
+			.on("close", this.handleServerOnClose)
+			.on("listening", this.handleServerOnListening)
+			.on("connection", this.handleServerOnConnection);
+	}
+
+	unsubscribeFromServer() {
+		this.server
+			.off("close", this.handleServerOnClose)
+			.off("listening", this.handleServerOnListening)
+			.off("connection", this.handleServerOnConnection);
+	}
+
+	handleServerOnClose() {
+		this.unsubscribeFromServer();
 		this.server = null;
+
+		this.emitStopped();
+	}
+
+	handleServerOnListening() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("listening", chalk.magenta(`${this.server.address().address}:${this.server.address().port}`));
+
+		this.emitStarted();
 	}
 
 	handleServerOnConnection(socket) {
 		if (this.socket) {
-			log("Transport", this.constructor.name, "server already has a current transport connected socket");
-
 			// drop other connection
+
+			if (ifLog(LOG_LEVELS.INFO)) this.log("server already has a current transport connected socket, drop other connection", chalk.magenta(`${socket.remoteAddress}:${socket.remotePort}`));
+
 			socket.destroy();
 		} else {
 			this.socketDestroyedByStopCalled = false;
 
 			this.socket = this.enhanceSocket(socket);
 
-			log("Transport", this.constructor.name, "connected", chalk.magenta(`${this.socket.localAddress}:${this.socket.localPort}`), "--", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
+			if (ifLog(LOG_LEVELS.INFO)) this.log("connected", chalk.magenta(`${this.socket.localAddress}:${this.socket.localPort}`), "--", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
 		}
 	}
 
@@ -525,41 +848,23 @@ class BufferSocketServerTransport extends BufferSocketTransport {
 		else if (error.code === "ECONNRESET") errorMessage = "connection reset";
 		else if (error.code === "ETIMEDOUT") errorMessage = "connection timeout";
 
-		log("Transport", this.constructor.name, "error", errorMessage);
+		if (ifLog(LOG_LEVELS.INFO)) this.log("error", errorMessage);
 	}
 
 	handleSocketOnClose() {
-		log("Transport", this.constructor.name, "disconnected", this.socket.remoteAddress, this.socket.remotePort);
+		if (ifLog(LOG_LEVELS.INFO)) this.log("disconnected", this.socket.remoteAddress, this.socket.remotePort);
 
 		this.socket = null;
 	}
 }
 
 class TCPBufferSocketServerTransport extends BufferSocketServerTransport {
-	constructor(port) {
-		super(port);
-
-		this.handleServerOnListening = this.handleServerOnListening.bind(this);
+	createLog() {
+		this.log = createLog("[transport]", "[tcp-server]");
 	}
 
 	createServer() {
 		this.server = net.createServer();
-
-		this.server
-			.on("listening", this.handleServerOnListening);
-
-		this.server.listen(this.port, ALL_INTERFACES);
-	}
-
-	handleServerOnListening() {
-		log("Transport", this.constructor.name, "listening", chalk.magenta(`${this.server.address().address}:${this.server.address().port}`));
-	}
-
-	destroyServer() {
-		this.server
-			.off("listening", this.handleServerOnListening);
-
-		this.server.close();
 	}
 }
 
@@ -580,16 +885,14 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 	start() {
 		super.start();
 
-		log("Transport", this.constructor.name, "starting");
-
 		this.connecting = true;
 		this.attemptToConnectTimeout = setTimeout(this.attemptToConnect, 0);
+
+		this.emitStarted();
 	}
 
 	stop() {
 		super.stop();
-
-		log("Transport", this.constructor.name, "stopping");
 
 		if (this.connecting) {
 			this.attemptToConnectTimeout = clearTimeout(this.attemptToConnectTimeout);
@@ -601,12 +904,14 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 			this.destroySocket(this.socket);
 			this.socket = null;
 		}
+
+		this.emitStopped();
 	}
 
 	attemptToConnect() {
 		if (!this.connecting) return;
 
-		log("Transport", this.constructor.name, "attempting to connect");
+		if (ifLog(LOG_LEVELS.INFO)) this.log("attempting to connect to", chalk.magenta(`${this.host}:${this.port}`));
 
 		const socket = this.enhanceSocket(this.createSocket());
 		socket
@@ -617,7 +922,7 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 
 				this.connecting = false;
 
-				log("Transport", this.constructor.name, "connected", chalk.magenta(`${this.socket.localAddress}:${this.socket.localPort}`), "--", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
+				if (ifLog(LOG_LEVELS.INFO)) this.log("connected", chalk.magenta(`${this.socket.localAddress}:${this.socket.localPort}`), "--", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
 			});
 	}
 
@@ -627,11 +932,13 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 		else if (error.code === "ECONNRESET") errorMessage = "connection reset";
 		else if (error.code === "ETIMEDOUT") errorMessage = "connection timeout";
 
-		log("Transport", this.constructor.name, "error", errorMessage);
+		if (ifLog(LOG_LEVELS.INFO)) this.log("error", errorMessage);
 	}
 
 	handleSocketOnClose() {
-		if (this.socket) log("Transport", this.constructor.name, "disconnected", this.socket.remoteAddress, this.socket.remotePort);
+		if (this.socket) {
+			if (ifLog(LOG_LEVELS.INFO)) this.log("disconnected from", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
+		}
 
 		this.socket = null;
 
@@ -641,13 +948,21 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 		}
 
 		const connectionAttemptTimeout = this.connecting ? TRANSPORT_CONNECTION_TIMEOUT : 0;
-		if (this.connecting) log("Transport", this.constructor.name, "waiting connection attempt timeout", connectionAttemptTimeout);
+
+		if (this.connecting) {
+			if (ifLog(LOG_LEVELS.INFO)) ("waiting connection attempt timeout", connectionAttemptTimeout);
+		}
+
 		if (!this.connecting) this.connecting = true;
 		this.attemptToConnectTimeout = setTimeout(this.attemptToConnect, connectionAttemptTimeout);
 	}
 }
 
 class TCPBufferSocketClientTransport extends BufferSocketClientTransport {
+	createLog() {
+		this.log = createLog("[transport]", "[tcp-socket]");
+	}
+
 	createSocket() {
 		return net.connect(this.port, this.host);
 	}
@@ -669,12 +984,12 @@ function enhanceWebSocket(webSocket) {
 }
 
 class WebSocketBufferSocketServerTransport extends BufferSocketServerTransport {
-	createServer() {
-		this.server = new ws.WebSocketServer({ host: ALL_INTERFACES, port: this.port });
+	createLog() {
+		this.log = createLog("[transport]", "[ws-server]");
 	}
 
-	destroyServer() {
-		this.server.close();
+	createServer() {
+		this.server = new ws.WebSocketServer({ host: ALL_INTERFACES, port: this.port });
 	}
 
 	enhanceSocket(webSocket) {
@@ -683,6 +998,10 @@ class WebSocketBufferSocketServerTransport extends BufferSocketServerTransport {
 }
 
 class WebSocketBufferSocketClientTransport extends BufferSocketClientTransport {
+	createLog() {
+		this.log = createLog("[transport]", "[ws-socket]");
+	}
+
 	createSocket() {
 		return new ws.WebSocket(`ws://${this.host}:${this.port}`);
 	}
@@ -693,6 +1012,8 @@ class WebSocketBufferSocketClientTransport extends BufferSocketClientTransport {
 }
 
 export default {
+	WORKING_STATE,
+
 	Connection,
 	InputConnection,
 	OutputConnection,

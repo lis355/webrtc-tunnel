@@ -32,13 +32,13 @@ export default async function urlTests(socks5InputConnectionPort) {
 				// log(`${url} [${proxy}]`);
 
 				const result = await fetch(url, { agent: new SocksProxyAgent(proxy) });
-				const text = (await result.text()).trim();
+				const text = (await result.text()).trim().split("\n")[0];
 
 				if (externalIp !== text) throw new Error(`Bad ip response, expected: ${externalIp}, actual: ${text}`);
 
-				log(url, chalk.magenta(text.split("\n")[0]), ((performance.now() - start) / 1000).toFixed(2), "s");
+				log(url, chalk.magenta(text), ((performance.now() - start) / 1000).toFixed(2), "s");
 			} catch (error) {
-				log(chalk.red(error.message));
+				log(url, chalk.red(error.message));
 			}
 		});
 
