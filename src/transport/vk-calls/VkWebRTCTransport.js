@@ -1,11 +1,6 @@
 import { getVkWebSocketSignalServerUrlByJoinId, VkWebSocketSignalServer } from "./VkWebSocketSignalServer.js";
-import { log } from "../../utils/log.js";
-import symmetricStringCipher from "../../utils/symmetricStringCipher.js";
+import { createLog, ifLog, LOG_LEVELS } from "../../utils/log.js";
 import WebRTCTransport from "../webrtc/WebRTCTransport.js";
-
-const DEVELOPMENT_FLAGS = {
-	logIceServers: false
-};
 
 // Транспорт, использующий TURN сервера VK
 // Для получения TURN сервера и создания webrtc коннекта используется VkWebSocketSignalServer
@@ -26,6 +21,10 @@ export default class VkWebRTCTransport extends WebRTCTransport.WebRTCTransport {
 
 		this.on("sdp.offer", this.handleOnSdpOffer);
 		this.on("sdp.answer", this.handleOnSdpAnswer);
+	}
+
+	createLog() {
+		this.log = createLog("[transport]", "[vk-webrtc]");
 	}
 
 	async startConnection() {
@@ -61,28 +60,32 @@ export default class VkWebRTCTransport extends WebRTCTransport.WebRTCTransport {
 	}
 
 	handleVkWebSocketSignalServerOnError(error) {
-		log("Transport", this.constructor.name, "VkWebSocketSignalServer error", error.message);
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("vk signal server error", error.message);
 	}
 
 	handleVkWebSocketSignalServerOnStarted() {
-		log("Transport", this.constructor.name, "VkWebSocketSignalServer started");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("vk signal server started");
+
+		this.emitStarted();
 	}
 
 	handleVkWebSocketSignalServerOnStopped() {
-		log("Transport", this.constructor.name, "VkWebSocketSignalServer stopped");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("vk signal server stopped");
+
+		this.emitStopped();
 	}
 
 	async handleVkWebSocketSignalServerOnReady() {
-		log("Transport", this.constructor.name, "VkWebSocketSignalServer got connection");
+		if (ifLog(LOG_LEVELS.INFO)) this.log("vk signal server got connection");
 
 		this.iceServers = [this.vkWebSocketSignalServer.connectionInfo.conversationParams.turn];
 
-		if (DEVELOPMENT_FLAGS.logIceServers) log("Transport", this.constructor.name, "iceServers", JSON.stringify(this.iceServers));
+		if (ifLog(LOG_LEVELS.DEBUG)) this.log("iceServers", JSON.stringify(this.iceServers));
 
 		await super.startConnection();
 
 		if (this.turnServerConnectionSuccess) {
-			log("Transport", this.constructor.name, "VkWebSocketSignalServer", "peerId", this.vkWebSocketSignalServer.peerId, "participantId", this.vkWebSocketSignalServer.participantId, "conversationId", this.vkWebSocketSignalServer.conversationId);
+			if (ifLog(LOG_LEVELS.INFO)) this.log("vk signal server peerId", this.vkWebSocketSignalServer.peerId, "participantId", this.vkWebSocketSignalServer.participantId, "conversationId", this.vkWebSocketSignalServer.conversationId);
 
 			// кто зашёл вторым, т.е. в this.vkWebSocketSignalServer.connectionInfo.conversation.participants уже есть список участников
 			// тот будет оффером, и будет отправлять существущему участнику заявку
@@ -97,7 +100,7 @@ export default class VkWebRTCTransport extends WebRTCTransport.WebRTCTransport {
 				this.isAnswerPeer = false;
 				this.answerParticipantId = firstParticipant.id;
 
-				log("Transport", this.constructor.name, "start offer connection", "answerParticipantId", this.answerParticipantId);
+				if (ifLog(LOG_LEVELS.INFO)) this.log("vk signal server start offer connection", "answerParticipantId", this.answerParticipantId);
 
 				this.startOfferConnection();
 			} else {
@@ -107,7 +110,7 @@ export default class VkWebRTCTransport extends WebRTCTransport.WebRTCTransport {
 				this.isAnswerPeer = true;
 				this.answerParticipantId = this.vkWebSocketSignalServer.participantId;
 
-				log("Transport", this.constructor.name, "start answer connection");
+				if (ifLog(LOG_LEVELS.INFO)) this.log("vk signal server start answer connection");
 
 				this.startAnswerConnection();
 			}
@@ -119,7 +122,7 @@ export default class VkWebRTCTransport extends WebRTCTransport.WebRTCTransport {
 		// 	message.type === "notification" &&
 		// 	["connection", "settings-update"].includes(message.notification)) return;
 
-		// log("handleVkWebSocketSignalServerOnMessage", message);
+		// if (ifLog(LOG_LEVELS.DEBUG)) this.log("vk signal server", "handleVkWebSocketSignalServerOnMessage", message);
 	}
 
 	handleVkWebSocketSignalServerOnNotification(message) {
@@ -133,11 +136,11 @@ export default class VkWebRTCTransport extends WebRTCTransport.WebRTCTransport {
 				try {
 					sdp = JSON.parse(decryptedData);
 				} catch {
-					log("Transport", this.constructor.name, "bad data decoding from participant", senderParticipantId, "data", data);
+					if (ifLog(LOG_LEVELS.INFO)) this.log("bad data decoding from participant", senderParticipantId, "data", data);
 				}
 
 				if (sdp) {
-					log("sdp", sdp.type, "from", senderParticipantId);
+					if (ifLog(LOG_LEVELS.INFO)) this.log("sdp", sdp.type, "from", senderParticipantId);
 
 					if (this.isOfferPeer &&
 						this.answerParticipantId === senderParticipantId) {
@@ -147,13 +150,13 @@ export default class VkWebRTCTransport extends WebRTCTransport.WebRTCTransport {
 
 						this.createAnswer(sdp);
 					} else {
-						log("Transport", this.constructor.name, "strange logic on decoded sdp message from participant", senderParticipantId, "data", data);
+						if (ifLog(LOG_LEVELS.INFO)) this.log("strange logic on decoded sdp message from participant", senderParticipantId, "data", data);
 					}
 				} else {
-					log("Transport", this.constructor.name, "unknown custom-data message from participant", senderParticipantId, "data", data);
+					if (ifLog(LOG_LEVELS.INFO)) this.log("unknown custom-data message from participant", senderParticipantId, "data", data);
 				}
 			} else {
-				log("Transport", this.constructor.name, "unknown custom-data message from participant", senderParticipantId, "data", data);
+				if (ifLog(LOG_LEVELS.INFO)) this.log("unknown custom-data message from participant", senderParticipantId, "data", data);
 			}
 		}
 	}

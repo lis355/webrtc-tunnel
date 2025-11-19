@@ -5,10 +5,11 @@ import { config as dotenv } from "dotenv-flow";
 import { setLogLevel, LOG_LEVELS } from "../utils/log.js";
 import ntun from "../ntun.js";
 import urlTests from "./urlTests.js";
+import waits from "./waits.js";
 
 dotenv();
 
-setLogLevel(LOG_LEVELS.INFO);
+setLogLevel(LOG_LEVELS.DETAILED);
 
 async function run() {
 	const transports = ["tcp", "ws"];
@@ -50,28 +51,10 @@ async function run() {
 
 				return resolve();
 			}),
-			new Promise(resolve => {
-				const check = () => {
-					if (serverNode.workingState === ntun.WORKING_STATE.WORKING &&
-						clientNode.workingState === ntun.WORKING_STATE.WORKING &&
-						serverNode.transport.isConnected &&
-						clientNode.transport.isConnected) {
-						serverNode.off("started", check);
-						clientNode.off("started", check);
-						serverNode.transport.off("connected", check);
-						clientNode.transport.off("connected", check);
-
-						return resolve();
-					}
-				};
-
-				serverNode.on("started", check);
-				clientNode.on("started", check);
-				serverNode.transport.on("connected", check);
-				clientNode.transport.on("connected", check);
-
-				check();
-			})
+			waits.waitForStarted(serverNode),
+			waits.waitForStarted(clientNode),
+			waits.waitForConnected(serverNode.transport),
+			waits.waitForConnected(clientNode.transport)
 		]);
 
 		await urlTests(socks5InputConnectionPort);
@@ -87,28 +70,10 @@ async function run() {
 
 				return resolve();
 			}),
-			new Promise(resolve => {
-				const check = () => {
-					if (serverNode.workingState === ntun.WORKING_STATE.IDLE &&
-						clientNode.workingState === ntun.WORKING_STATE.IDLE &&
-						serverNode.transport.workingState === ntun.WORKING_STATE.IDLE &&
-						clientNode.transport.workingState === ntun.WORKING_STATE.IDLE) {
-						serverNode.off("stopped", check);
-						clientNode.off("stopped", check);
-						serverNode.transport.off("stopped", check);
-						clientNode.transport.off("stopped", check);
-
-						return resolve();
-					}
-				};
-
-				serverNode.on("stopped", check);
-				clientNode.on("stopped", check);
-				serverNode.transport.on("stopped", check);
-				clientNode.transport.on("stopped", check);
-
-				check();
-			})
+			waits.waitForStopped(serverNode),
+			waits.waitForStopped(clientNode),
+			waits.waitForStopped(serverNode.transport),
+			waits.waitForStopped(clientNode.transport)
 		]);
 	}
 }

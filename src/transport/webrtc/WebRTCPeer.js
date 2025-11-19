@@ -2,7 +2,11 @@ import EventEmitter from "events";
 
 import wrtc from "wrtc";
 
-export default class WebRTCPeer extends EventEmitter {
+import { createLog, ifLog, LOG_LEVELS } from "../../utils/log.js";
+
+const log = createLog("[WebRTCPeer]");
+
+export class WebRTCPeer extends EventEmitter {
 	static ICE_GATHERING_TIMEOUT = 60 * 1000;
 
 	static arrayBufferToBuffer(arrayBuffer) {
@@ -39,23 +43,26 @@ export default class WebRTCPeer extends EventEmitter {
 
 		this.iceCandidates = [];
 
-		this.peerConnection.ondatachannel = event => {
-			this.peerConnection.dataChannel = event.channel;
-			this.handleDataChannelCreated();
+		this.peerConnection.onconnectionstatechange = event => {
+			switch (this.peerConnection.connectionState) {
+				case "connected":
+					this.emit("connected");
+					break;
+				case "closed":
+					this.emit("disconnected");
+					break;
+			}
 		};
 	}
 
-	initialize() {
-	}
-
 	destroy() {
-		this.peerConnection.dataChannel.close();
-		this.peerConnection.dataChannel = null;
+		this.iceCandidates = [];
 
 		this.peerConnection.close();
-		this.peerConnection = null;
+	}
 
-		this.iceCandidates = [];
+	get connectionState() {
+		return this.peerConnection.connectionState;
 	}
 
 	async waitForIceGathering() {
@@ -64,7 +71,7 @@ export default class WebRTCPeer extends EventEmitter {
 		return new Promise((resolve, reject) => {
 			this.waitForIceGatheringTime = performance.now();
 
-			this.emit("log", "iceGathering.started");
+			if (ifLog(LOG_LEVELS.DEBUG)) log("iceGathering.started");
 
 			this.waitForIceGatheringCheckTimeout = setTimeout(() => {
 				this.waitForIceGatheringCheckTimeout = clearTimeout(this.waitForIceGatheringCheckTimeout);
@@ -78,7 +85,7 @@ export default class WebRTCPeer extends EventEmitter {
 				const type = candidate.candidate.split(" ")[7];
 				const addr = candidate.address + ":" + candidate.port;
 
-				this.emit("log", "iceGathering.candidate", type, addr);
+				if (ifLog(LOG_LEVELS.DEBUG)) log("iceGathering.candidate", type, addr);
 			};
 
 			const handleIceGatheringFinished = () => {
@@ -86,11 +93,17 @@ export default class WebRTCPeer extends EventEmitter {
 
 				this.waitForIceGatheringTime = performance.now() - this.waitForIceGatheringTime;
 
+				this.peerConnection.onicegatheringstatechange = null;
 				this.peerConnection.onicecandidate = null;
+				this.peerConnection.onicecandidateerror = null;
 
-				this.emit("log", "iceGathering.finished", this.waitForIceGatheringTime / 1000);
+				if (ifLog(LOG_LEVELS.DEBUG)) log("iceGathering.finished", this.waitForIceGatheringTime / 1000);
 
 				return resolve();
+			};
+
+			this.peerConnection.onicegatheringstatechange = event => {
+				if (ifLog(LOG_LEVELS.DEBUG)) log("iceGathering.statechanged", this.peerConnection.iceGatheringState);
 			};
 
 			this.peerConnection.onicecandidate = event => {
@@ -104,20 +117,31 @@ export default class WebRTCPeer extends EventEmitter {
 			};
 
 			this.peerConnection.onicecandidateerror = error => {
-				this.emit("log", "iceGathering.candidateError", error);
+				// if (ifLog(LOG_LEVELS.DEBUG)) log("iceGathering.candidateError", error.errorText);
 			};
 		});
 	}
 
-	async createOffer() {
-		this.peerConnection.dataChannel = this.peerConnection.createDataChannel("chat");
-		this.handleDataChannelCreated();
+	getOfferOptions() {
+		// если не добавлено никаких tracks и datachannels до createOffer
+		// то iceGathering не начнется,
+		// в таком случае нужно добавлять, как минимум, options.offerToReceiveAudio = true;
 
-		const offer = await this.peerConnection.createOffer();
+		return {
+			offerToReceiveAudio: true
+		};
+	}
+
+	async createOffer() {
+		const offer = await this.peerConnection.createOffer(this.getOfferOptions());
 
 		await this.peerConnection.setLocalDescription(offer);
 
 		await this.waitForIceGathering();
+
+		if (ifLog(LOG_LEVELS.DEBUG)) log("offer created");
+
+		this.offer = this.peerConnection.localDescription;
 
 		return this.peerConnection.localDescription;
 	}
@@ -131,36 +155,81 @@ export default class WebRTCPeer extends EventEmitter {
 
 		await this.waitForIceGathering();
 
+		if (ifLog(LOG_LEVELS.DEBUG)) log("answer created");
+
 		return this.peerConnection.localDescription;
 	}
 
 	async setAnswer(answer) {
 		await this.peerConnection.setRemoteDescription(answer);
 	}
+}
+
+export class WebRTCDataChannelPeer extends WebRTCPeer {
+	constructor(options) {
+		super(options);
+
+		this.peerConnection.ondatachannel = event => {
+			this.dataChannel = event.channel;
+			this.handleDataChannelCreated();
+		};
+	}
+
+	destroy() {
+		this.peerConnection.ondatachannel = null;
+
+		this.dataChannel.close();
+
+		super.destroy();
+	}
+
+	getOfferOptions() {
+		return {};
+	}
+
+	async createOffer() {
+		this.dataChannel = this.peerConnection.createDataChannel("data");
+		this.handleDataChannelCreated();
+
+		return super.createOffer();
+	}
 
 	handleDataChannelCreated() {
-		this.peerConnection.dataChannel.onopen = () => {
-			this.emit("connected");
+		this.subscribeOnDataChannel();
+	}
+
+	subscribeOnDataChannel() {
+		this.dataChannel.onopen = () => {
+			this.emit("dataChannelOpened");
 		};
 
-		this.peerConnection.dataChannel.onclose = () => {
-			this.emit("disconnected");
+		this.dataChannel.onclose = () => {
+			this.unsubscribeFromDataChannel();
+			this.dataChannel = null;
+
+			this.emit("dataChannelClosed");
 		};
 
-		this.peerConnection.dataChannel.onmessage = event => {
-			this.handleMessage(event.data);
+		this.dataChannel.onmessage = event => {
+			this.handleDataChannelOnMessage(event.data);
 		};
 	}
 
-	sendMessage(message) {
-		this.emit("log", "sendMessage", message);
-
-		this.peerConnection.dataChannel.send(message);
+	unsubscribeFromDataChannel() {
+		this.dataChannel.onopen = null;
+		this.dataChannel.onclose = null;
+		this.dataChannel.onmessage = null;
 	}
 
-	handleMessage(message) {
-		this.emit("log", "handleMessage", message);
+	handleDataChannelOnMessage(message) {
+		if (ifLog(LOG_LEVELS.DEBUG)) log("handleDataChannelOnMessage", message);
 
-		this.emit("message", message);
+		this.emit("dataChannelMessage", message);
+	}
+
+	sendDataChannelMessage(message) {
+		if (ifLog(LOG_LEVELS.DEBUG)) log("sendDataChannelMessage", message);
+
+		this.dataChannel.send(message);
 	}
 }

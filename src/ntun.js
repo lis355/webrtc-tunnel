@@ -148,7 +148,7 @@ class Connection extends EventEmitter {
 		this.emitWillStop();
 
 		for (const [connectionId, connection] of this.connections) {
-			this.sendSocketMultiplexerClose(connectionId, "abort");
+			if (this.node.transport.isConnected) this.sendSocketMultiplexerClose(connectionId, "abort");
 
 			this.deleteConnection(connection);
 

@@ -1,31 +1,38 @@
 import { config as dotenv } from "dotenv-flow";
 
-import urlTests from "../urlTests.js";
-import { WebRTCPeerServerTransport, WebRTCPeerClientTransport } from "../../transport/webrtc/WebRTCTransport.js";
-import { log } from "../../utils/log.js";
+import { log, setLogLevel, LOG_LEVELS } from "../../utils/log.js";
 import ntun from "../../ntun.js";
+import urlTests from "../urlTests.js";
+import waits from "../waits.js";
+import WebRTCTransport from "../../transport/webrtc/WebRTCTransport.js";
 
 dotenv();
+
+// Free TURN servers for testing
+// https://dashboard.metered.ca/
+
+// WebRTC servers tester
+// https://webrtc.github.io/samples/src/content/peerconnection/trickle-ice/
+
+setLogLevel(LOG_LEVELS.DETAILED);
 
 async function run() {
 	const iceServers = JSON.parse(process.env.DEVELOP_WEB_RTC_SERVERS);
 	const socks5InputConnectionPort = 8080;
 
-	const serverTransport = new WebRTCPeerServerTransport(iceServers);
 	const serverNode = new ntun.Node();
 	serverNode.connection = new ntun.outputConnections.DirectOutputConnection(serverNode);
-	serverNode.transport = serverTransport;
+	serverNode.transport = new WebRTCTransport.WebRTCPeerServerTransport(iceServers);
 
-	const clientTransport = new WebRTCPeerClientTransport(iceServers);
 	const clientNode = new ntun.Node();
 	clientNode.connection = new ntun.inputConnections.Socks5InputConnection(clientNode, { port: socks5InputConnectionPort });
-	clientNode.transport = clientTransport;
+	clientNode.transport = new WebRTCTransport.WebRTCPeerClientTransport(iceServers);
 
-	serverTransport
+	serverNode.transport
 		.on("error", error => {
 			log(error.message);
 
-			serverTransport.stop();
+			serverNode.transport.stop();
 		})
 		.on("sdp.offer", async sdp => {
 			log("offer created");
@@ -44,7 +51,7 @@ async function run() {
 
 				if (response.status === 200) {
 					const sdpAnswer = await response.json();
-					serverTransport.setAnswer(sdpAnswer);
+					serverNode.transport.setAnswer(sdpAnswer);
 
 					log("answer settled");
 				} else {
@@ -53,19 +60,13 @@ async function run() {
 			};
 
 			waitForAnswer();
-		})
-		.on("connected", () => {
-			serverNode.start();
-		})
-		.on("disconnected", () => {
-			serverNode.stop();
 		});
 
-	clientTransport
+	clientNode.transport
 		.on("error", error => {
 			log(error.message);
 
-			clientTransport.stop();
+			clientNode.transport.stop();
 		})
 		.on("sdp.answer", async sdp => {
 			log("answer created");
@@ -74,18 +75,7 @@ async function run() {
 				method: "POST",
 				body: JSON.stringify(sdp)
 			});
-		})
-		.on("connected", () => {
-			clientNode.start();
-		})
-		.on("disconnected", () => {
-			clientNode.stop();
 		});
-
-	serverTransport.start();
-	clientTransport.start();
-
-	await new Promise(resolve => setTimeout(resolve, 1000));
 
 	const waitForOffer = async () => {
 		log("waitForOffer");
@@ -96,7 +86,7 @@ async function run() {
 
 		if (response.status === 200) {
 			const sdpOffer = await response.json();
-			clientTransport.createAnswer(sdpOffer);
+			clientNode.transport.createAnswer(sdpOffer);
 		} else {
 			setTimeout(waitForOffer, 1000);
 		}
@@ -104,21 +94,39 @@ async function run() {
 
 	waitForOffer();
 
-	await new Promise(resolve => {
-		const check = () => {
-			if (serverTransport.socket
-				&& clientTransport.socket) return resolve();
+	await Promise.all([
+		new Promise(async resolve => {
+			serverNode.start();
+			clientNode.start();
 
-			setTimeout(check, 100);
-		};
+			clientNode.transport.start();
+			serverNode.transport.start();
 
-		check();
-	});
+			return resolve();
+		}),
+		waits.waitForStarted(serverNode),
+		waits.waitForStarted(clientNode),
+		waits.waitForConnected(serverNode.transport),
+		waits.waitForConnected(clientNode.transport)
+	]);
 
 	await urlTests(socks5InputConnectionPort);
 
-	serverTransport.stop();
-	clientTransport.stop();
+	await Promise.all([
+		new Promise(async resolve => {
+			clientNode.transport.stop();
+			serverNode.transport.stop();
+
+			serverNode.stop();
+			clientNode.stop();
+
+			return resolve();
+		}),
+		waits.waitForStopped(serverNode),
+		waits.waitForStopped(clientNode),
+		waits.waitForStopped(serverNode.transport),
+		waits.waitForStopped(clientNode.transport)
+	]);
 }
 
 run();

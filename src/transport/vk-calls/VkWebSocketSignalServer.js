@@ -3,6 +3,10 @@ import EventEmitter from "events";
 
 import * as ws from "ws";
 
+import { createLog, ifLog, LOG_LEVELS } from "../../utils/log.js";
+
+const log = createLog("[VkWebSocketSignalServer]");
+
 export async function getVkWebSocketSignalServerUrlByJoinId(joinId) {
 	const applicationKey = "CGMMEJLGDIHBABABA";
 	const clientSecret = "QbYic1K3lEV5kTGiqlq2";
@@ -137,7 +141,7 @@ export class VkWebSocketSignalServer extends EventEmitter {
 		try {
 			data = data.toString();
 		} catch {
-			log("VkWebSocketSignalServer", "recieve unknown message");
+			if (ifLog(LOG_LEVELS.DETAILED)) log("recieve unknown message");
 
 			return;
 		}
@@ -148,7 +152,7 @@ export class VkWebSocketSignalServer extends EventEmitter {
 		} catch {
 		}
 
-		// log("VkWebSocketSignalServer", "recieve", data);
+		if (ifLog(LOG_LEVELS.DEBUG)) log("VkWebSocketSignalServer", "recieve", data);
 
 		if (data === "ping") this.send("pong");
 
@@ -170,14 +174,10 @@ export class VkWebSocketSignalServer extends EventEmitter {
 	}
 
 	send(data) {
-		// log("VkWebSocketSignalServer", "send", data);
-
 		this.webSocket.send(data);
 	}
 
 	sendJson(json) {
-		// log("VkWebSocketSignalServer", "sendJson", json);
-
 		this.send(JSON.stringify(json));
 	}
 

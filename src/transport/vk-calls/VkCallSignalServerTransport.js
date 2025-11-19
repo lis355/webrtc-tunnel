@@ -1,8 +1,8 @@
 import net from "node:net";
 
+import { createLog, ifLog, LOG_LEVELS } from "../../utils/log.js";
 import { getVkWebSocketSignalServerUrlByJoinId, VkWebSocketSignalServer } from "./VkWebSocketSignalServer.js";
 import ntun from "../../ntun.js";
-import { log } from "../../utils/log.js";
 import symmetricStringCipher from "../../utils/symmetricStringCipher.js";
 
 class TransportBufferSocketWrapper extends net.Socket {
@@ -69,6 +69,10 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 		this.on("disconnected", this.handleOnDisconnected);
 	}
 
+	createLog() {
+		this.log = createLog("[transport]", "[vk-call]");
+	}
+
 	start() {
 		super.start();
 
@@ -113,19 +117,23 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 	}
 
 	handleVkWebSocketSignalServerOnError(error) {
-		log("Transport", this.constructor.name, "VkWebSocketSignalServer error", error.message);
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("vk signal server error", error.message);
 	}
 
 	handleVkWebSocketSignalServerOnStarted() {
-		log("Transport", this.constructor.name, "VkWebSocketSignalServer started");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("vk signal server started");
+
+		this.emitStarted();
 	}
 
 	handleVkWebSocketSignalServerOnStopped() {
-		log("Transport", this.constructor.name, "VkWebSocketSignalServer stopped");
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log("vk signal server stopped");
+
+		this.emitStopped();
 	}
 
 	async handleVkWebSocketSignalServerOnReady() {
-		log("Transport", this.constructor.name, "VkWebSocketSignalServer", "peerId", this.vkWebSocketSignalServer.peerId, "participantId", this.vkWebSocketSignalServer.participantId, "conversationId", this.vkWebSocketSignalServer.conversationId);
+		if (ifLog(LOG_LEVELS.INFO)) this.log("vk signal server peerId", this.vkWebSocketSignalServer.peerId, "participantId", this.vkWebSocketSignalServer.participantId, "conversationId", this.vkWebSocketSignalServer.conversationId);
 
 		this.state = VkCallSignalServerTransport.STATES.CONNECTING;
 
@@ -158,7 +166,7 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 		// 	message.type === "notification" &&
 		// 	["connection", "settings-update"].includes(message.notification)) return;
 
-		// log("handleVkWebSocketSignalServerOnMessage", message);
+		// if (ifLog(LOG_LEVELS.DEBUG)) this.log("handleVkWebSocketSignalServerOnMessage", message);
 	}
 
 	handleVkWebSocketSignalServerOnNotification(message) {
@@ -171,7 +179,7 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 
 					this.handleOnParticipantMessage(senderParticipantId, type, data);
 				} else {
-					log("Transport", this.constructor.name, "unknown custom-data message from participant", senderParticipantId, "data", str);
+					if (ifLog(LOG_LEVELS.INFO)) this.log("unknown custom-data message from participant", senderParticipantId, "data", str);
 				}
 
 				break;
@@ -229,7 +237,9 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 							this.sendMessageToParticipant(this.opponentParticipantId, VkCallSignalServerTransport.MESSAGE_TYPES.ACCEPT);
 
 							this.socket = new TransportBufferSocketWrapper();
-						} else log("Transport", this.constructor.name, "bad logic message from participant", participantId, type, data);
+						} else {
+							if (ifLog(LOG_LEVELS.INFO)) this.log("bad logic message from participant", participantId, type, data);
+						}
 
 						break;
 					}
@@ -241,11 +251,15 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 							this.opponentParticipantId = participantId;
 
 							this.socket = new TransportBufferSocketWrapper();
-						} else log("Transport", this.constructor.name, "bad logic message from participant", participantId, type, data);
+						} else {
+							if (ifLog(LOG_LEVELS.INFO)) this.log("bad logic message from participant", participantId, type, data);
+						}
 
 						break;
 					}
-					default: log("Transport", this.constructor.name, "bad logic message from participant", participantId, type, data);
+					default: {
+						if (ifLog(LOG_LEVELS.INFO)) this.log("bad logic message from participant", participantId, type, data);
+					}
 				}
 
 				break;
@@ -257,7 +271,9 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 
 						break;
 					}
-					default: log("Transport", this.constructor.name, "bad logic message from participant", participantId, type, data);
+					default: {
+						if (ifLog(LOG_LEVELS.INFO)) this.log("bad logic message from participant", participantId, type, data);
+					}
 				}
 
 				break;
