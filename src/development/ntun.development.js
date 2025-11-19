@@ -9,7 +9,7 @@ import waits from "./waits.js";
 
 dotenv();
 
-setLogLevel(LOG_LEVELS.DETAILED);
+setLogLevel(LOG_LEVELS.INFO);
 
 async function run() {
 	const transports = ["tcp", "ws"];
@@ -30,10 +30,12 @@ async function run() {
 				serverNode.transport = new ntun.transports.TCPBufferSocketServerTransport(transportPort);
 				clientNode.transport = new ntun.transports.TCPBufferSocketClientTransport(transportHost, transportPort);
 				break;
+
 			case "ws":
 				serverNode.transport = new ntun.transports.WebSocketBufferSocketServerTransport(transportPort);
 				clientNode.transport = new ntun.transports.WebSocketBufferSocketClientTransport(transportHost, transportPort);
 				break;
+
 			default:
 				throw new Error("Invalid transport");
 		}

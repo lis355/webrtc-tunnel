@@ -1,7 +1,6 @@
 import { config as dotenv } from "dotenv-flow";
 
 import getJoinId from "../../transport/vk-calls/getJoinId.js";
-import { log } from "../../utils/log.js";
 import ntun from "../../ntun.js";
 import urlTests from "../urlTests.js";
 import VkCallSignalServerTransport from "../../transport/vk-calls/VkCallSignalServerTransport.js";
@@ -12,53 +11,49 @@ async function run() {
 	const joinId = getJoinId(process.env.DEVELOP_VK_JOIN_ID_OR_LINK);
 	const socks5InputConnectionPort = 8080;
 
-	const serverTransport = new VkCallSignalServerTransport(joinId);
 	const serverNode = new ntun.Node();
 	serverNode.connection = new ntun.outputConnections.DirectOutputConnection(serverNode);
-	serverNode.transport = serverTransport;
+	serverNode.transport = new VkCallSignalServerTransport(joinId);
 
-	const clientTransport = new VkCallSignalServerTransport(joinId);
 	const clientNode = new ntun.Node();
 	clientNode.connection = new ntun.inputConnections.Socks5InputConnection(clientNode, { port: socks5InputConnectionPort });
-	clientNode.transport = clientTransport;
+	clientNode.transport = new VkCallSignalServerTransport(joinId);
 
-	serverTransport
-		.on("connected", () => {
+	// await new Promise(resolve => setTimeout(resolve, 1000));
+
+	await Promise.all([
+		new Promise(async resolve => {
 			serverNode.start();
-		})
-		.on("disconnected", () => {
-			serverNode.stop();
-		});
-
-	clientTransport
-		.on("connected", () => {
 			clientNode.start();
-		})
-		.on("disconnected", () => {
-			clientNode.stop();
-		});
 
-	serverTransport.start();
+			clientNode.transport.start();
+			serverNode.transport.start();
 
-	await new Promise(resolve => setTimeout(resolve, 1000));
-
-	clientTransport.start();
-
-	await new Promise(resolve => {
-		const check = () => {
-			if (serverTransport.socket
-				&& clientTransport.socket) return resolve();
-
-			setTimeout(check, 100);
-		};
-
-		check();
-	});
+			return resolve();
+		}),
+		waits.waitForStarted(serverNode),
+		waits.waitForStarted(clientNode),
+		waits.waitForConnected(serverNode.transport),
+		waits.waitForConnected(clientNode.transport)
+	]);
 
 	await urlTests(socks5InputConnectionPort);
 
-	serverTransport.stop();
-	clientTransport.stop();
+	await Promise.all([
+		new Promise(async resolve => {
+			clientNode.transport.stop();
+			serverNode.transport.stop();
+
+			serverNode.stop();
+			clientNode.stop();
+
+			return resolve();
+		}),
+		waits.waitForStopped(serverNode),
+		waits.waitForStopped(clientNode),
+		waits.waitForStopped(serverNode.transport),
+		waits.waitForStopped(clientNode.transport)
+	]);
 }
 
 run();

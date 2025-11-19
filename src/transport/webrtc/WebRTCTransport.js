@@ -1,40 +1,7 @@
-import net from "node:net";
-
 import { createLog, ifLog, LOG_LEVELS } from "../../utils/log.js";
 import { WebRTCDataChannelPeer, WebRTCPeer } from "./WebRTCPeer.js";
 import ntun from "../../ntun.js";
-import symmetricBufferCipher from "../../utils/symmetricBufferCipher.js";
-
-class TransportBufferSocketWrapper extends net.Socket {
-	constructor() {
-		super();
-
-		this.handleOnData = this.handleOnData.bind(this);
-
-		this
-			.on("data", this.handleOnData);
-	}
-
-	write(data) {
-		this.emit("write", data);
-
-		return true;
-	}
-
-	push(data) {
-		this.emit("data", data);
-
-		return true;
-	}
-
-	sendBuffer(buffer) {
-		this.write(buffer);
-	}
-
-	handleOnData(data) {
-		this.emit("buffer", data);
-	}
-}
+import TransportCipherBufferSocketWrapper from "../../utils/sockets/TransportCipherBufferSocketWrapper.js";
 
 class WebRTCTransport extends ntun.Transport {
 	constructor() {
@@ -48,7 +15,8 @@ class WebRTCTransport extends ntun.Transport {
 		this.handlePeerOnDataChannelOpened = this.handlePeerOnDataChannelOpened.bind(this);
 		this.handlePeerOnDataChannelClosed = this.handlePeerOnDataChannelClosed.bind(this);
 		this.handlePeerOnDataChannelMessage = this.handlePeerOnDataChannelMessage.bind(this);
-		this.handleSocketOnWrite = this.handleSocketOnWrite.bind(this);
+		this.handleSocketOnError = this.handleSocketOnError.bind(this);
+		this.handleSocketOnWriteBuffer = this.handleSocketOnWriteBuffer.bind(this);
 	}
 
 	start() {
@@ -62,7 +30,8 @@ class WebRTCTransport extends ntun.Transport {
 
 		if (this.socket) {
 			this.socket
-				.off("write", this.handleSocketOnWrite);
+				.off("error", this.handleSocketOnError)
+				.off("writeBuffer", this.handleSocketOnWriteBuffer);
 
 			this.socket = null;
 		}
@@ -195,7 +164,8 @@ class WebRTCTransport extends ntun.Transport {
 
 		if (this.socket) {
 			this.socket
-				.off("write", this.handleSocketOnWrite);
+				.off("error", this.handleSocketOnError)
+				.off("writeBuffer", this.handleSocketOnWriteBuffer);
 
 			this.socket = null;
 		}
@@ -204,15 +174,17 @@ class WebRTCTransport extends ntun.Transport {
 	}
 
 	handlePeerOnDataChannelOpened() {
-		this.socket = new TransportBufferSocketWrapper();
+		this.socket = new TransportCipherBufferSocketWrapper();
 		this.socket
-			.on("write", this.handleSocketOnWrite);
+			.on("error", this.handleSocketOnError)
+			.on("writeBuffer", this.handleSocketOnWriteBuffer);
 	}
 
 	handlePeerOnDataChannelClosed() {
 		if (this.socket) {
 			this.socket
-				.off("write", this.handleSocketOnWrite);
+				.off("error", this.handleSocketOnError)
+				.off("writeBuffer", this.handleSocketOnWriteBuffer);
 
 			this.socket = null;
 		}
@@ -230,21 +202,19 @@ class WebRTCTransport extends ntun.Transport {
 		if (ifLog(LOG_LEVELS.DEBUG)) this.log("message");
 
 		const buffer = WebRTCPeer.arrayBufferToBuffer(message);
-		try {
-			const decryptedBuffer = symmetricBufferCipher.decrypt(buffer);
-			this.socket.push(decryptedBuffer);
-		} catch {
-			if (ifLog(LOG_LEVELS.ERROR)) this.log("decrypt message error, connection will be aborted");
-
-			this.stop();
-		}
+		this.socket.pushBuffer(buffer);
 	}
 
-	handleSocketOnWrite(buffer) {
-		if (ifLog(LOG_LEVELS.DEBUG)) this.log("socket sendBuffer");
+	handleSocketOnError(error) {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("socket error", error.message);
 
-		const encryptedBuffer = symmetricBufferCipher.encrypt(buffer);
-		const arrayBuffer = WebRTCPeer.bufferToArrayBuffer(encryptedBuffer);
+		this.stop();
+	}
+
+	handleSocketOnWriteBuffer(buffer) {
+		if (ifLog(LOG_LEVELS.DEBUG)) this.log("socket write buffer");
+
+		const arrayBuffer = WebRTCPeer.bufferToArrayBuffer(buffer);
 		this.peer.sendDataChannelMessage(arrayBuffer);
 	}
 }

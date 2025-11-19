@@ -7,8 +7,9 @@ import chalk from "chalk";
 import msgpack from "msgpack5";
 import socks from "socksv5";
 
-import * as bufferSocket from "./bufferSocket.js";
+import CipherBufferSocket from "./utils/sockets/CipherBufferSocket.js";
 import { createLog, ifLog, LOG_LEVELS } from "./utils/log.js";
+import symmetricBufferCipher from "./utils/symmetricBufferCipher.js";
 
 const DEVELOPMENT_FLAGS = {
 	stringHash: false,
@@ -375,7 +376,7 @@ class ConnectionMultiplexer extends EventEmitter {
 			}
 		}
 
-		this.socket.sendBuffer(buffer);
+		this.socket.writeBuffer(buffer);
 	}
 
 	async handleSocketOnBuffer(buffer) {
@@ -874,7 +875,7 @@ class BufferSocketServerTransport extends BufferSocketTransport {
 }
 
 function enhanceTCPSocket(socket) {
-	socket = bufferSocket.enhanceSocket(socket);
+	socket = CipherBufferSocket.enhanceSocket(socket);
 
 	return socket;
 }
@@ -1004,11 +1005,25 @@ class TCPBufferSocketClientTransport extends BufferSocketClientTransport {
 }
 
 function enhanceWebSocket(webSocket) {
-	webSocket.sendBuffer = buffer => webSocket.send(buffer);
+	webSocket.writeBuffer = buffer => {
+		const encryptedBuffer = symmetricBufferCipher.encrypt(buffer);
+		webSocket.send(encryptedBuffer);
+	};
+
 	webSocket.end = () => webSocket.close();
 	webSocket.destroy = () => webSocket.terminate();
+
 	webSocket.on("open", () => webSocket.emit("connect"));
-	webSocket.on("message", message => webSocket.emit("buffer", message));
+	webSocket.on("message", message => {
+		let decryptedBuffer;
+		try {
+			decryptedBuffer = symmetricBufferCipher.decrypt(message);
+		} catch {
+			webSocket.emit("error", new Error("Decryption error"));
+		}
+
+		webSocket.emit("buffer", decryptedBuffer);
+	});
 
 	Object.defineProperty(webSocket, "localAddress", { get: () => webSocket._socket.localAddress });
 	Object.defineProperty(webSocket, "localPort", { get: () => webSocket._socket.localPort });
