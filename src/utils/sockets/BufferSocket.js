@@ -1,6 +1,6 @@
 const lengthBuffer = Buffer.allocUnsafe(4);
 
-// maximumChunkSize 64 kB
+// maximumChunkSize 32 kB
 export default class BufferSocket {
 	static STATE_READ_LENGTH = 0;
 	static STATE_READ_BUFFER = 1;
@@ -14,7 +14,7 @@ export default class BufferSocket {
 
 	constructor(options) {
 		this.options = options || {};
-		this.maximumChunkSize = this.options.maximumChunkSize = this.options.maximumChunkSize || 64 * 1024;
+		this.maximumChunkSize = this.options.maximumChunkSize = this.options.maximumChunkSize || 32 * 1024;
 
 		this.state = BufferSocket.STATE_READ_LENGTH;
 		this.chunks = [];

@@ -1,7 +1,6 @@
 import BufferSocket from "./BufferSocket.js";
 import symmetricBufferCipher from "../symmetricBufferCipher.js";
 
-// maximumChunkSize 64 kB
 export default class CipherBufferSocket extends BufferSocket {
 	static enhanceSocket(socket, options) {
 		const bufferSocket = new CipherBufferSocket(options);
@@ -20,10 +19,10 @@ export default class CipherBufferSocket extends BufferSocket {
 		let decryptedBuffer;
 		try {
 			decryptedBuffer = symmetricBufferCipher.decrypt(buffer);
+
+			super.pushBuffer(decryptedBuffer);
 		} catch {
 			this.socket.emit("error", new Error("Decryption error"));
 		}
-
-		super.pushBuffer(decryptedBuffer);
 	}
 }

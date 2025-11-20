@@ -12,7 +12,6 @@ import { createLog, ifLog, LOG_LEVELS } from "./utils/log.js";
 import symmetricBufferCipher from "./utils/symmetricBufferCipher.js";
 
 const DEVELOPMENT_FLAGS = {
-	stringHash: false,
 	logPrintPeriodicallyStatus: false
 };
 
@@ -47,9 +46,6 @@ function getHexTable(buffer, offset = 0, length = null, bytesPerLine = 32) {
 	return output.trim();
 }
 
-const LOCALHOST = "127.0.0.1";
-const ALL_INTERFACES = "0.0.0.0";
-
 const packer = msgpack();
 
 function objectToBuffer(obj) {
@@ -59,6 +55,9 @@ function objectToBuffer(obj) {
 function bufferToObject(buffer) {
 	return packer.decode(buffer);
 }
+
+const LOCALHOST = "127.0.0.1";
+const ALL_INTERFACES = "0.0.0.0";
 
 function int32md5XorHash(str) {
 	const hash = crypto.createHash("md5").update(str).digest();
@@ -78,9 +77,7 @@ const WORKING_STATE = {
 
 class Connection extends EventEmitter {
 	static getConnectionIdBySocket(socket) {
-		return DEVELOPMENT_FLAGS.stringHash
-			? `${socket.localAddress}:${socket.localPort}--${socket.remoteAddress}:${socket.remotePort}`
-			: int32md5XorHash(socket.localAddress + socket.localPort + socket.remoteAddress + socket.remotePort);
+		return int32md5XorHash(socket.localAddress + socket.localPort + socket.remoteAddress + socket.remotePort);
 	}
 
 	constructor(node, options = {}) {
@@ -232,7 +229,7 @@ class Connection extends EventEmitter {
 		connection.wasClosed = true;
 
 		if (errorMessage) {
-			if (ifLog(LOG_LEVELS.DETAILED)) this.log("remote connection error", connectionId, errorMessage);
+			if (ifLog(LOG_LEVELS.DETAILED)) this.log(`error with [${connection.destinationHost}:${connection.destinationPort}]`, errorMessage);
 		}
 
 		this.deleteConnection(connection);
@@ -289,13 +286,16 @@ class Connection extends EventEmitter {
 	}
 
 	handleConnectionSocketOnError(connection, error) {
-		if (ifLog(LOG_LEVELS.DETAILED)) this.log(`error [${connection.socket.remoteAddress}:${connection.socket.remotePort}]`, error.code || error.message);
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log(`error with [${connection.destinationHost}:${connection.destinationPort}]`, error.code || error.message);
 
 		connection.errorMessage = error.code || error.message;
 	}
 
 	handleConnectionSocketOnConnect(connection) {
 		if (ifLog(LOG_LEVELS.DETAILED)) this.log(`connected with [${connection.socket.remoteAddress}:${connection.socket.remotePort}]`);
+
+		connection.destinationHost = connection.socket.remoteAddress;
+		connection.destinationPort = connection.socket.remotePort;
 
 		connection.connected = true;
 	}
@@ -307,7 +307,7 @@ class Connection extends EventEmitter {
 	}
 
 	handleConnectionSocketOnClose(connection) {
-		if (ifLog(LOG_LEVELS.DETAILED)) this.log(`closed with [${connection.socket.remoteAddress}:${connection.socket.remotePort}]`);
+		if (ifLog(LOG_LEVELS.DETAILED)) this.log(`closed with [${connection.destinationHost}:${connection.destinationPort}]`);
 
 		connection.connected = false;
 
@@ -362,64 +362,114 @@ class ConnectionMultiplexer extends EventEmitter {
 
 	sendMessageConnect(connectionId, destinationHost, destinationPort) {
 		this.sendMessage(ConnectionMultiplexer.MESSAGE_TYPES.CONNECT, connectionId, destinationHost, destinationPort);
+
+		// const destinationHostBufferSizeBuffer = Buffer.allocUnsafe(2);
+		// const destinationHostBuffer = Buffer.from(destinationHost, "utf8");
+		// destinationHostBufferSizeBuffer.writeUInt16LE(destinationHostBuffer.length, 0);
+		// const destinationPortBuffer = Buffer.allocUnsafe(2);
+		// destinationPortBuffer.writeUInt16LE(destinationPort, 0);
+
+		// this.sendMessage(connectionId, ConnectionMultiplexer.MESSAGE_TYPES.CONNECT, [
+		// 	destinationHostBufferSizeBuffer,
+		// 	destinationHostBuffer,
+		// 	destinationPortBuffer
+		// ]);
+
+		if (ifLog(LOG_LEVELS.DEBUG)) connectionMultiplexerLog("send", "CONN", connectionId, destinationHost, destinationPort);
 	}
 
 	sendMessageClose(connectionId, errorMessage = null) {
 		this.sendMessage(ConnectionMultiplexer.MESSAGE_TYPES.CLOSE, connectionId, errorMessage);
+
+		// const errorMessageSizeBuffer = Buffer.allocUnsafe(2);
+		// const errorMessageBuffer = Buffer.from(errorMessage || "", "utf8");
+		// errorMessageSizeBuffer.writeUInt16LE(errorMessageBuffer.length, 0);
+
+		// this.sendMessage(connectionId, ConnectionMultiplexer.MESSAGE_TYPES.CLOSE, [
+		// 	errorMessageSizeBuffer,
+		// 	errorMessageBuffer
+		// ]);
+
+		if (ifLog(LOG_LEVELS.DEBUG)) connectionMultiplexerLog("send", "CLSE", connectionId, errorMessage);
 	}
 
 	sendMessageData(connectionId, data) {
 		this.sendMessage(ConnectionMultiplexer.MESSAGE_TYPES.DATA, connectionId, data);
-	}
 
-	sendMessage(type, connectionId, ...args) {
-		const message = [type, connectionId, ...args];
-		const buffer = objectToBuffer(message);
+		// this.sendMessage(connectionId, ConnectionMultiplexer.MESSAGE_TYPES.DATA, [
+		// 	data
+		// ]);
 
 		if (ifLog(LOG_LEVELS.DEBUG)) {
-			switch (type) {
-				case ConnectionMultiplexer.MESSAGE_TYPES.CONNECT: connectionMultiplexerLog("send", "CONN", connectionId, args[0], args[1]); break;
-				case ConnectionMultiplexer.MESSAGE_TYPES.CLOSE: connectionMultiplexerLog("send", "CLSE", connectionId, args[0]); break;
-				case ConnectionMultiplexer.MESSAGE_TYPES.DATA:
-					connectionMultiplexerLog("send", "DATA", connectionId, args[0].length);
-					// connectionMultiplexerLog(getHexTable(args[0]));
-					break;
-			}
+			connectionMultiplexerLog("send", "DATA", connectionId, data.length);
+			// console.log(getHexTable(data));
 		}
+	}
+
+	sendMessage(messageType, connectionId, ...args) {
+		const message = [messageType, connectionId, ...args];
+		const buffer = objectToBuffer(message);
 
 		this.socket.writeBuffer(buffer);
 	}
 
+	// sendMessage(connectionId, messageType, buffers) {
+	// 	const connectionIdBuffer = Buffer.allocUnsafe(4);
+	// 	connectionIdBuffer.writeUInt32LE(connectionId, 0);
+	// 	const messageTypeBuffer = Buffer.allocUnsafe(1);
+	// 	messageTypeBuffer.writeUInt8(messageType, 0);
+
+	// 	this.socket.writeBuffer(Buffer.concat([
+	// 		connectionIdBuffer,
+	// 		messageTypeBuffer,
+	// 		...buffers
+	// 	]));
+	// }
+
 	async handleSocketOnBuffer(buffer) {
 		const message = bufferToObject(buffer);
-		const [type, connectionId, ...args] = message;
+		const [messageType, connectionId, ...args] = message;
 
-		if (ifLog(LOG_LEVELS.DEBUG)) {
-			switch (type) {
-				case ConnectionMultiplexer.MESSAGE_TYPES.CONNECT: connectionMultiplexerLog("recv", "CONN", connectionId, args[0], args[1]); break;
-				case ConnectionMultiplexer.MESSAGE_TYPES.CLOSE: connectionMultiplexerLog("recv", "CLSE", connectionId, args[0]); break;
-				case ConnectionMultiplexer.MESSAGE_TYPES.DATA:
-					connectionMultiplexerLog("recv", "DATA", connectionId, args[0].length);
-					// connectionMultiplexerLog(getHexTable(args[0]));
-					break;
-			}
-		}
+		// let position = 0;
+		// const connectionId = buffer.readUInt32LE(position); position += 4;
+		// const messageType = buffer.readUInt8(position); position += 1;
 
-		switch (type) {
+		switch (messageType) {
 			case ConnectionMultiplexer.MESSAGE_TYPES.CONNECT: {
 				const [destinationHost, destinationPort] = args;
+
+				// const destinationHostLength = buffer.readUInt16LE(position); position += 2;
+				// const destinationHost = buffer.subarray(position, position + destinationHostLength).toString("utf8"); position += destinationHostLength;
+				// const destinationPort = buffer.readUInt16LE(position); position += 2;
+
+				if (ifLog(LOG_LEVELS.DEBUG)) connectionMultiplexerLog("recv", "CONN", connectionId, destinationHost, destinationPort);
+
 				this.emit("connect", connectionId, destinationHost, destinationPort);
 
 				break;
 			}
 			case ConnectionMultiplexer.MESSAGE_TYPES.CLOSE: {
 				const [errorMessage] = args;
+
+				// const errorMessageLength = buffer.readUInt16LE(position); position += 2;
+				// const errorMessage = buffer.subarray(position, position + errorMessageLength).toString("utf8"); position += errorMessageLength;
+
+				if (ifLog(LOG_LEVELS.DEBUG)) connectionMultiplexerLog("recv", "CLSE", connectionId, errorMessage);
+
 				this.emit("close", connectionId, errorMessage);
 
 				break;
 			}
 			case ConnectionMultiplexer.MESSAGE_TYPES.DATA: {
 				const [data] = args;
+
+				// const data = buffer.subarray(position);
+
+				if (ifLog(LOG_LEVELS.DEBUG)) {
+					connectionMultiplexerLog("recv", "DATA", connectionId, data.length);
+					// console.log(getHexTable(data));
+				}
+
 				this.emit("data", connectionId, data);
 
 				break;
@@ -647,7 +697,9 @@ class DirectOutputConnection extends OutputConnection {
 
 		const destinationSocket = net.connect(destinationPort, destinationHost);
 
-		this.createConnection(connectionId, destinationSocket);
+		const connection = this.createConnection(connectionId, destinationSocket);
+		connection.destinationHost = destinationHost;
+		connection.destinationPort = destinationPort;
 	}
 }
 
