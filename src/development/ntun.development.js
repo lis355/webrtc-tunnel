@@ -24,6 +24,13 @@ async function run() {
 	const clientNode = new ntun.Node({ name: "in" });
 	clientNode.connection = new ntun.inputConnections.Socks5InputConnection(clientNode, { port: socks5InputConnectionPort });
 
+	global.setLogLevelInfo = () => setLogLevel(LOG_LEVELS.INFO);
+	global.setLogLevelDebug = () => setLogLevel(LOG_LEVELS.DEBUG);
+	global.serverNode = serverNode;
+	global.outConnection = serverNode.connection;
+	global.clientNode = clientNode;
+	global.inConnection = clientNode.connection;
+
 	for (const transport of transports) {
 		switch (transport) {
 			case "tcp":
@@ -39,6 +46,9 @@ async function run() {
 			default:
 				throw new Error("Invalid transport");
 		}
+
+		global.serverTransport = serverNode.transport;
+		global.clientTransport = clientNode.transport;
 
 		await Promise.all([
 			new Promise(async resolve => {

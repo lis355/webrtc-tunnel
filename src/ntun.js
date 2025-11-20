@@ -11,10 +11,6 @@ import CipherBufferSocket from "./utils/sockets/CipherBufferSocket.js";
 import { createLog, ifLog, LOG_LEVELS } from "./utils/log.js";
 import symmetricBufferCipher from "./utils/symmetricBufferCipher.js";
 
-const DEVELOPMENT_FLAGS = {
-	logPrintPeriodicallyStatus: false
-};
-
 function getHexTable(buffer, offset = 0, length = null, bytesPerLine = 32) {
 	if (!Buffer.isBuffer(buffer)) buffer = Buffer.from(buffer);
 
@@ -125,12 +121,6 @@ class Connection extends EventEmitter {
 	}
 
 	emitStarted() {
-		if (DEVELOPMENT_FLAGS.logPrintPeriodicallyStatus) {
-			this.logPrintPeriodicallyStatusInterval = setInterval(() => {
-				this.log("Connection", this.constructor.name, this.connections.size, Array.from(this.connections.values()).map(c => c.socket.readyState).join(","));
-			}, 1000);
-		}
-
 		this.workingState = WORKING_STATE.WORKING;
 
 		if (ifLog(LOG_LEVELS.DETAILED)) this.log("started");
@@ -169,10 +159,6 @@ class Connection extends EventEmitter {
 	}
 
 	emitStopped() {
-		if (DEVELOPMENT_FLAGS.logPrintPeriodicallyStatus) {
-			this.logPrintPeriodicallyStatusInterval = clearInterval(this.logPrintPeriodicallyStatusInterval);
-		}
-
 		this.workingState = WORKING_STATE.IDLE;
 
 		if (ifLog(LOG_LEVELS.DETAILED)) this.log("stopped");
@@ -286,7 +272,7 @@ class Connection extends EventEmitter {
 	}
 
 	handleConnectionSocketOnError(connection, error) {
-		if (ifLog(LOG_LEVELS.DETAILED)) this.log(`error with [${connection.destinationHost}:${connection.destinationPort}]`, error.code || error.message);
+		if (ifLog(LOG_LEVELS.INFO)) this.log(`error with [${connection.destinationHost}:${connection.destinationPort}]`, error.code || error.message);
 
 		connection.errorMessage = error.code || error.message;
 	}
@@ -402,7 +388,7 @@ class ConnectionMultiplexer extends EventEmitter {
 
 		if (ifLog(LOG_LEVELS.DEBUG)) {
 			connectionMultiplexerLog("send", "DATA", connectionId, data.length);
-			// console.log(getHexTable(data));
+			console.log(getHexTable(data));
 		}
 	}
 
@@ -467,7 +453,7 @@ class ConnectionMultiplexer extends EventEmitter {
 
 				if (ifLog(LOG_LEVELS.DEBUG)) {
 					connectionMultiplexerLog("recv", "DATA", connectionId, data.length);
-					// console.log(getHexTable(data));
+					console.log(getHexTable(data));
 				}
 
 				this.emit("data", connectionId, data);
