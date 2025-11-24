@@ -28,12 +28,7 @@ class WebRTCTransport extends ntun.Transport {
 	stop() {
 		super.stop();
 
-		if (this.transportSocket) {
-			this.transportSocket
-				.off("error", this.handleSocketOnError);
-
-			this.transportSocket = null;
-		}
+		this.destroyTransportSocket();
 
 		this.destroyPeer();
 	}
@@ -151,26 +146,7 @@ class WebRTCTransport extends ntun.Transport {
 		this.peer.setAnswer(sdpAnswer);
 	}
 
-	handlePeerOnConnected() {
-	}
-
-	handlePeerOnDisconnected() {
-		this.peer
-			.off("disconnected", this.handlePeerOnDisconnected);
-
-		this.peer = null;
-
-		if (this.transportSocket) {
-			this.transportSocket
-				.off("error", this.handleSocketOnError);
-
-			this.transportSocket = null;
-		}
-
-		if (this.workingState === ntun.WORKING_STATE.STOPPING) this.emitStopped();
-	}
-
-	handlePeerOnDataChannelOpened() {
+	createTransportSocket() {
 		this.transportSocket = new ntun.transports.TransportSocket({
 			write: data => {
 				if (ifLog(LOG_LEVELS.DEBUG)) this.log("socket write data");
@@ -185,13 +161,37 @@ class WebRTCTransport extends ntun.Transport {
 			.on("error", this.handleSocketOnError);
 	}
 
-	handlePeerOnDataChannelClosed() {
+	destroyTransportSocket() {
 		if (this.transportSocket) {
 			this.transportSocket
 				.off("error", this.handleSocketOnError);
 
+			this.transportSocket.close();
+
 			this.transportSocket = null;
 		}
+	}
+
+	handlePeerOnConnected() {
+	}
+
+	handlePeerOnDisconnected() {
+		this.peer
+			.off("disconnected", this.handlePeerOnDisconnected);
+
+		this.peer = null;
+
+		this.destroyTransportSocket();
+
+		if (this.workingState === ntun.WORKING_STATE.STOPPING) this.emitStopped();
+	}
+
+	handlePeerOnDataChannelOpened() {
+		this.createTransportSocket();
+	}
+
+	handlePeerOnDataChannelClosed() {
+		this.destroyTransportSocket();
 	}
 
 	printConnectedLog() {

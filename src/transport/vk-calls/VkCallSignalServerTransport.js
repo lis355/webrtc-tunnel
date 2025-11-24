@@ -2,7 +2,6 @@ import { createLog, ifLog, LOG_LEVELS } from "../../utils/log.js";
 import { getVkWebSocketSignalServerUrlByJoinId, VkWebSocketSignalServer } from "./VkWebSocketSignalServer.js";
 import ntun from "../../ntun.js";
 import symmetricBufferCipher from "../../utils/symmetricBufferCipher.js";
-import TransportCipherBufferSocketWrapper from "../../utils/sockets/TransportCipherBufferSocketWrapper.js";
 
 // Транспорт, использующий только сигнальный сервер VkWebSocketSignalServer VK
 // данные передаются посредством адресного отправления данных методом "custom-data"
@@ -18,10 +17,10 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 		BUFFER: 2
 	};
 
-	constructor(joinId) {
-		super();
+	constructor(options) {
+		super(options);
 
-		this.joinId = joinId;
+		this.joinId = this.options.joinId;
 
 		this.handleOnConnected = this.handleOnConnected.bind(this);
 		this.handleOnDisconnected = this.handleOnDisconnected.bind(this);
@@ -33,7 +32,6 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 		this.handleVkWebSocketSignalServerOnNotification = this.handleVkWebSocketSignalServerOnNotification.bind(this);
 		this.handleSocketOnError = this.handleSocketOnError.bind(this);
 		this.handleSocketOnClose = this.handleSocketOnClose.bind(this);
-		this.handleSocketOnWriteBuffer = this.handleSocketOnWriteBuffer.bind(this);
 
 		this.on("connected", this.handleOnConnected);
 		this.on("disconnected", this.handleOnDisconnected);
@@ -67,12 +65,11 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 	stop() {
 		super.stop();
 
-		if (this.transportSocket) this.transportSocket.destroy();
+		this.destroyTransportSocket();
 
 		this.vkWebSocketSignalServer
 			.off("error", this.handleVkWebSocketSignalServerOnError)
 			.off("started", this.handleVkWebSocketSignalServerOnStarted)
-			// .off("stopped", this.handleVkWebSocketSignalServerOnStopped)
 			.off("ready", this.handleVkWebSocketSignalServerOnReady)
 			.off("message", this.handleVkWebSocketSignalServerOnMessage)
 			.off("notification", this.handleVkWebSocketSignalServerOnNotification);
@@ -80,6 +77,29 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 		this.vkWebSocketSignalServer.stop();
 
 		this.webSocketUrl = null;
+	}
+
+	createTransportSocket() {
+		this.transportSocket = new ntun.transports.TransportSocket({
+			write: data => {
+				this.sendMessageToParticipant(this.opponentParticipantId, VkCallSignalServerTransport.MESSAGE_TYPES.BUFFER, { buffer: data.toString("base64") });
+			},
+			...this.options
+		});
+
+		this.transportSocket
+			.on("error", this.handleSocketOnError);
+	}
+
+	destroyTransportSocket() {
+		if (this.transportSocket) {
+			this.transportSocket
+				.off("error", this.handleSocketOnError);
+
+			this.transportSocket.close();
+
+			this.transportSocket = null;
+		}
 	}
 
 	handleVkWebSocketSignalServerOnError(error) {
@@ -126,7 +146,6 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 
 	sendConnectToOpponentParticipants() {
 		Object.values(this.participants)
-			// .filter(participant => participant.id > this.vkWebSocketSignalServer.participantId)
 			.forEach(participant => {
 				this.sendMessageToParticipant(participant.id, VkCallSignalServerTransport.MESSAGE_TYPES.CONNECT);
 			});
@@ -163,10 +182,7 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 
 					this.participants[participantId] = { id: participantId };
 
-					if (this.state === VkCallSignalServerTransport.STATES.CONNECTING
-						//  &&
-						// participantId > this.vkWebSocketSignalServer.participantId
-					) {
+					if (this.state === VkCallSignalServerTransport.STATES.CONNECTING) {
 						this.sendMessageToParticipant(participantId, VkCallSignalServerTransport.MESSAGE_TYPES.CONNECT);
 					}
 
@@ -183,7 +199,7 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 					participantId === this.opponentParticipantId) {
 					this.state = VkCallSignalServerTransport.STATES.CONNECTING;
 
-					this.transportSocket = null;
+					this.destroyTransportSocket();
 
 					this.sendConnectToOpponentParticipants();
 				}
@@ -200,15 +216,14 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 			case VkCallSignalServerTransport.STATES.CONNECTING: {
 				switch (type) {
 					case VkCallSignalServerTransport.MESSAGE_TYPES.CONNECT: {
-						if (//participantId < this.vkWebSocketSignalServer.participantId &&
-							!this.opponentParticipantId) {
+						if (!this.opponentParticipantId) {
 							this.state = VkCallSignalServerTransport.STATES.CONNECTED;
 
 							this.opponentParticipantId = participantId;
 
 							this.sendMessageToParticipant(this.opponentParticipantId, VkCallSignalServerTransport.MESSAGE_TYPES.ACCEPT);
 
-							this.transportSocket = new TransportCipherBufferSocketWrapper();
+							this.createTransportSocket();
 						} else {
 							if (ifLog(LOG_LEVELS.INFO)) this.log("bad logic message from participant", participantId, type, data);
 						}
@@ -216,13 +231,12 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 						break;
 					}
 					case VkCallSignalServerTransport.MESSAGE_TYPES.ACCEPT: {
-						if (//participantId > this.vkWebSocketSignalServer.participantId &&
-							!this.opponentParticipantId) {
+						if (!this.opponentParticipantId) {
 							this.state = VkCallSignalServerTransport.STATES.CONNECTED;
 
 							this.opponentParticipantId = participantId;
 
-							this.transportSocket = new TransportCipherBufferSocketWrapper();
+							this.createTransportSocket();
 						} else {
 							if (ifLog(LOG_LEVELS.INFO)) this.log("bad logic message from participant", participantId, type, data);
 						}
@@ -251,7 +265,7 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 						break;
 					}
 					case VkCallSignalServerTransport.MESSAGE_TYPES.BUFFER: {
-						this.transportSocket.pushBuffer(Buffer.from(data.buffer, "base64"));
+						this.transportSocket.push(Buffer.from(data.buffer, "base64"));
 
 						break;
 					}
@@ -275,18 +289,9 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 	}
 
 	handleOnConnected() {
-		this.transportSocket
-			.on("error", this.handleSocketOnError)
-			.on("close", this.handleSocketOnClose)
-			.on("writeBuffer", this.handleSocketOnWriteBuffer);
 	}
 
 	handleOnDisconnected() {
-		this.transportSocket
-			.off("error", this.handleSocketOnError)
-			.off("close", this.handleSocketOnClose)
-			.off("writeBuffer", this.handleSocketOnWriteBuffer);
-
 		this.opponentParticipantId = null;
 	}
 
@@ -297,10 +302,6 @@ export default class VkCallSignalServerTransport extends ntun.Transport {
 	}
 
 	handleSocketOnClose() {
-		this.transportSocket = null;
-	}
-
-	handleSocketOnWriteBuffer(buffer) {
-		this.sendMessageToParticipant(this.opponentParticipantId, VkCallSignalServerTransport.MESSAGE_TYPES.BUFFER, { buffer: buffer.toString("base64") });
+		this.destroyTransportSocket();
 	}
 }

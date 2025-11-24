@@ -118,7 +118,6 @@ export class VkWebSocketSignalServer extends EventEmitter {
 		this.webSocket
 			.off("error", this.handleWebSocketOnError)
 			.off("open", this.handleWebSocketOnOpen)
-			// .off("close", this.handleWebSocketOnClose)
 			.off("message", this.handleWebSocketOnMessage);
 
 		this.webSocket.close();
