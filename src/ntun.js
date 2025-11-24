@@ -7,8 +7,8 @@ import chalk from "chalk";
 import msgpack from "msgpack5";
 import socks from "socksv5";
 
-import CipherBufferSocket from "./utils/sockets/CipherBufferSocket.js";
 import { createLog, ifLog, LOG_LEVELS } from "./utils/log.js";
+import DataRateLimiter from "./utils/DataRateLimiter.js";
 import symmetricBufferCipher from "./utils/symmetricBufferCipher.js";
 
 function getHexTable(buffer, offset = 0, length = null, bytesPerLine = 32) {
@@ -169,7 +169,7 @@ class Connection extends EventEmitter {
 	handleOnTransportConnected() {
 		this.subscribeOnConnectionMultiplexer();
 
-		this.connectionMultiplexer.socket = this.node.transport.socket;
+		this.connectionMultiplexer.socket = this.node.transport.transportSocket;
 	}
 
 	handleOnTransportDisconnected() {
@@ -388,7 +388,7 @@ class ConnectionMultiplexer extends EventEmitter {
 
 		if (ifLog(LOG_LEVELS.DEBUG)) {
 			connectionMultiplexerLog("send", "DATA", connectionId, data.length);
-			console.log(getHexTable(data));
+			// console.log(getHexTable(data));
 		}
 	}
 
@@ -453,7 +453,7 @@ class ConnectionMultiplexer extends EventEmitter {
 
 				if (ifLog(LOG_LEVELS.DEBUG)) {
 					connectionMultiplexerLog("recv", "DATA", connectionId, data.length);
-					console.log(getHexTable(data));
+					// console.log(getHexTable(data));
 				}
 
 				this.emit("data", connectionId, data);
@@ -689,14 +689,171 @@ class DirectOutputConnection extends OutputConnection {
 	}
 }
 
+class TransportSocketMiddleware {
+	performOutBuffer(buffer) {
+		return buffer;
+	}
+
+	performInBuffer(buffer) {
+		return buffer;
+	}
+}
+
+class TransportSocketSimpleCipherMiddleware extends TransportSocketMiddleware {
+	performOutBuffer(buffer) {
+		return symmetricBufferCipher.encrypt(buffer);
+	}
+
+	performInBuffer(buffer) {
+		return symmetricBufferCipher.decrypt(buffer);
+	}
+}
+
+const MAXIMUM_BUFFER_SIZE = 256 * 1024 ** 2; // 256 mB
+const MAXIMUM_CHUNK_SIZE = 128 * 1024; // 128 kB
+
+// writeBuffer
+// event:buffer
+class TransportSocket extends EventEmitter {
+	static STATE_READ_LENGTH = 0;
+	static STATE_READ_BUFFER = 1;
+
+	constructor(options) {
+		super();
+
+		this.options = options || {};
+		this.maximumChunkSize = this.options.maximumChunkSize = this.options.maximumChunkSize || MAXIMUM_CHUNK_SIZE;
+
+		if (typeof this.options.write !== "function") throw new Error("write must be a function");
+
+		this.clear();
+
+		this.handleOnData = this.handleOnData.bind(this);
+
+		this.on("data", this.handleOnData);
+
+		this.middlewares = [];
+
+		if (this.options.cipher === undefined ||
+			this.options.cipher) this.middlewares.push(new TransportSocketSimpleCipherMiddleware());
+
+		if (this.options.rateLimit &&
+			this.options.rateLimit.bytesPerSecond) {
+			this.dataRateLimiter = new DataRateLimiter({
+				rateLimitBytesPerSecond: this.options.rateLimit.bytesPerSecond,
+				send: chunk => this.writeRawChunk(chunk)
+			});
+		}
+	}
+
+	clear() {
+		this.sizeToRead = 4;
+		this.state = TransportSocket.STATE_READ_LENGTH;
+		this.chunks = [];
+		this.chunksTotalSize = 0;
+
+		if (this.dataRateLimiter) this.dataRateLimiter.clear();
+	}
+
+	writeBuffer(buffer) {
+		if (buffer.length > MAXIMUM_BUFFER_SIZE) throw new Error("Buffer too large");
+
+		try {
+			for (const middlewares of this.middlewares) buffer = middlewares.performOutBuffer(buffer);
+		} catch (error) {
+			this.emit("error", error);
+
+			return;
+		}
+
+		const lengthBuffer = Buffer.allocUnsafe(4);
+		lengthBuffer.writeUInt32BE(buffer.length, 0);
+		this.writeData(lengthBuffer);
+
+		if (buffer.length > this.maximumChunkSize) {
+			for (let i = 0; i < buffer.length; i += this.maximumChunkSize) {
+				this.writeData(buffer.subarray(i, i + this.maximumChunkSize));
+			}
+		} else {
+			this.writeData(buffer);
+		}
+	}
+
+	writeData(chunk) {
+		if (this.dataRateLimiter) this.dataRateLimiter.send(chunk);
+		else this.writeRawChunk(chunk);
+	}
+
+	writeRawChunk(chunk) {
+		this.options.write(chunk);
+	}
+
+	handleOnData(chunk) {
+		this.chunks.push(chunk);
+		this.chunksTotalSize += chunk.length;
+
+		this.processData();
+	}
+
+	processData() {
+		while (this.chunksTotalSize >= this.sizeToRead) {
+			let chunksToReadAmount = 0;
+			let chunksToReadSize = 0;
+			while (chunksToReadSize < this.sizeToRead) chunksToReadSize += this.chunks[chunksToReadAmount++].length;
+
+			if (chunksToReadAmount > 1) this.chunks.unshift(Buffer.concat(this.chunks.splice(0, chunksToReadAmount)));
+
+			let chunk = this.chunks[0];
+			let nextSizeToRead;
+			switch (this.state) {
+				case TransportSocket.STATE_READ_LENGTH:
+					nextSizeToRead = chunk.readUInt32BE(0);
+					this.state = TransportSocket.STATE_READ_BUFFER;
+					break;
+
+				case TransportSocket.STATE_READ_BUFFER:
+					this.pushBuffer(chunk.length > this.sizeToRead ? chunk.subarray(0, this.sizeToRead) : chunk);
+
+					nextSizeToRead = 4;
+					this.state = TransportSocket.STATE_READ_LENGTH;
+					break;
+			}
+
+			if (chunk.length > this.sizeToRead) {
+				this.chunks[0] = chunk.subarray(this.sizeToRead);
+			} else {
+				this.chunks.shift();
+			}
+
+			this.chunksTotalSize -= this.sizeToRead;
+
+			this.sizeToRead = nextSizeToRead;
+		}
+	}
+
+	pushBuffer(buffer) {
+		try {
+			for (const middlewares of this.middlewares) buffer = middlewares.performInBuffer(buffer);
+
+			this.emit("buffer", buffer);
+		} catch (error) {
+			this.emit("error", error);
+		}
+	}
+
+	close() {
+		this.clear();
+	}
+}
+
 class Transport extends EventEmitter {
-	constructor() {
+	constructor(options) {
 		super();
 
 		this.createLog();
 
-		this._socket = null;
-
+		this.options = options;
+		this._transportSocket = null;
 		this.workingState = WORKING_STATE.IDLE;
 
 		if (ifLog(LOG_LEVELS.INFO)) this.log("created");
@@ -748,12 +905,12 @@ class Transport extends EventEmitter {
 		this.emit("stopped");
 	}
 
-	get socket() {
-		return this._socket;
+	get transportSocket() {
+		return this._transportSocket;
 	}
 
-	set socket(newSocket) {
-		if (this._socket === newSocket) return;
+	set transportSocket(newSocket) {
+		if (this._transportSocket === newSocket) return;
 
 		if (!newSocket) {
 			this.printDisconnectedLog();
@@ -761,7 +918,7 @@ class Transport extends EventEmitter {
 			this.emit("disconnected");
 		}
 
-		this._socket = newSocket;
+		this._transportSocket = newSocket;
 
 		if (newSocket) {
 			this.printConnectedLog();
@@ -779,43 +936,58 @@ class Transport extends EventEmitter {
 	}
 
 	get isConnected() {
-		return Boolean(this.socket);
+		return Boolean(this.transportSocket);
 	}
 }
 
-class BufferSocketTransport extends Transport {
-	constructor() {
-		super();
+class ClientServerTransport extends Transport {
+	constructor(options) {
+		super(options);
+
+		this.host = this.options.host || ALL_INTERFACES;
+		this.port = this.options.port;
 
 		this.handleSocketOnError = this.handleSocketOnError.bind(this);
 		this.handleSocketOnClose = this.handleSocketOnClose.bind(this);
 	}
 
-	enhanceSocket(socket) {
-		socket
-			.on("error", this.handleSocketOnError)
-			.on("close", this.handleSocketOnClose);
+	createTransportSocket(socket) { throw new Error("Not implemented"); }
 
-		return socket;
+	handleSocketOnError(error) {
+		let errorMessage = error.message;
+		if (error.code === "ECONNREFUSED") errorMessage = "connection refused";
+		else if (error.code === "ECONNRESET") errorMessage = "connection reset";
+		else if (error.code === "ETIMEDOUT") errorMessage = "connection timeout";
+
+		if (ifLog(LOG_LEVELS.INFO)) this.log("error", errorMessage);
 	}
 
-	destroySocket(socket) {
-		socket
+	handleSocketOnClose() {
+		if (this.transportSocket) {
+			this.transportSocket.close();
+
+			this.transportSocket = null;
+		}
+
+		this.socket
 			.off("error", this.handleSocketOnError)
 			.off("close", this.handleSocketOnClose);
 
-		socket.destroy();
+		this.socket = null;
 	}
 
-	handleSocketOnError(error) { }
-	handleSocketOnClose() { }
+	printConnectedLog() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("connected", chalk.magenta(`${this.socket.localAddress}:${this.socket.localPort}`), "--", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
+	}
+
+	printDisconnectedLog() {
+		if (ifLog(LOG_LEVELS.INFO)) this.log("disconnected", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
+	}
 }
 
-class BufferSocketServerTransport extends BufferSocketTransport {
-	constructor(port) {
-		super();
-
-		this.port = port;
+class ServerTransport extends ClientServerTransport {
+	constructor(options) {
+		super(options);
 
 		this.handleServerOnError = this.handleServerOnError.bind(this);
 		this.handleServerOnClose = this.handleServerOnClose.bind(this);
@@ -830,7 +1002,7 @@ class BufferSocketServerTransport extends BufferSocketTransport {
 		this.createServer();
 		this.subscribeOnServer();
 
-		this.listenServer(ALL_INTERFACES);
+		this.listenServer(this.host);
 	}
 
 	listenServer(host) { throw new Error("Not implemented"); }
@@ -848,11 +1020,7 @@ class BufferSocketServerTransport extends BufferSocketTransport {
 	stop() {
 		super.stop();
 
-		if (this.socket) {
-			this.socketDestroyedByStopCalled = true;
-			this.destroySocket(this.socket);
-			this.socket = null;
-		}
+		if (this.socket) this.socket.destroy();
 
 		this.closeServer();
 	}
@@ -891,48 +1059,47 @@ class BufferSocketServerTransport extends BufferSocketTransport {
 	}
 
 	handleServerOnConnection(socket) {
-		if (this.socket) {
+		if (this.transportSocket) {
 			// drop other connection
 
 			if (ifLog(LOG_LEVELS.INFO)) this.log("server already has a current transport connected socket, drop other connection", chalk.magenta(`${socket.remoteAddress}:${socket.remotePort}`));
 
 			socket.destroy();
 		} else {
-			this.socketDestroyedByStopCalled = false;
+			this.socket = socket;
+			this.socket
+				.on("error", this.handleSocketOnError)
+				.on("close", this.handleSocketOnClose);
 
-			this.socket = this.enhanceSocket(socket);
+			this.transportSocket = this.createTransportSocket(this.socket);
 		}
 	}
-
-	handleSocketOnError(error) {
-		let errorMessage = error.message;
-		if (error.code === "ECONNREFUSED") errorMessage = "connection refused";
-		else if (error.code === "ECONNRESET") errorMessage = "connection reset";
-		else if (error.code === "ETIMEDOUT") errorMessage = "connection timeout";
-
-		if (ifLog(LOG_LEVELS.INFO)) this.log("error", errorMessage);
-	}
-
-	handleSocketOnClose() {
-		this.socket = null;
-	}
-
-	printConnectedLog() {
-		if (ifLog(LOG_LEVELS.INFO)) this.log("connected", chalk.magenta(`${this.socket.localAddress}:${this.socket.localPort}`), "--", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
-	}
-
-	printDisconnectedLog() {
-		if (ifLog(LOG_LEVELS.INFO)) this.log("disconnected", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
-	}
 }
 
-function enhanceTCPSocket(socket) {
-	socket = CipherBufferSocket.enhanceSocket(socket);
+function createTransportSocketForTCPSocket(socket, options) {
+	const transportSocket = new TransportSocket({
+		write: data => transportSocket.socket.write(data),
+		...options
+	});
 
-	return socket;
+	const onClose = () => {
+		transportSocket.socket.off("close", onClose);
+		transportSocket.socket.off("data", onData);
+
+		transportSocket.close();
+	};
+
+	const onData = chunk => transportSocket.handleOnData(chunk);
+
+	transportSocket.socket = socket;
+	transportSocket.socket
+		.on("close", onClose)
+		.on("data", onData);
+
+	return transportSocket;
 }
 
-class TCPBufferSocketServerTransport extends BufferSocketServerTransport {
+class TCPServerTransport extends ServerTransport {
 	createLog() {
 		this.log = createLog("[transport]", "[tcp-server]");
 	}
@@ -945,24 +1112,20 @@ class TCPBufferSocketServerTransport extends BufferSocketServerTransport {
 		this.server.listen(this.port, host);
 	}
 
-	enhanceSocket(socket) {
-		return super.enhanceSocket(enhanceTCPSocket(socket));
+	createTransportSocket(socket) {
+		return createTransportSocketForTCPSocket(socket, this.options);
 	}
 }
 
 const TRANSPORT_CONNECTION_TIMEOUT = 3 * 1000;
 
-class BufferSocketClientTransport extends BufferSocketTransport {
-	constructor(host, port) {
-		super();
-
-		this.host = host;
-		this.port = port;
+class ClientTransport extends ClientServerTransport {
+	constructor(options) {
+		super(options);
 
 		this.attemptToConnect = this.attemptToConnect.bind(this);
+		this.handleSocketOnConnect = this.handleSocketOnConnect.bind(this);
 	}
-
-	createSocket() { }
 
 	start() {
 		super.start();
@@ -983,40 +1146,34 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 
 		if (this.socket) {
 			this.socketDestroyedByStopCalled = true;
-			this.destroySocket(this.socket);
-			this.socket = null;
+
+			this.socket.destroy();
 		}
 
 		this.emitStopped();
 	}
+
+	createSocket() { throw new Error("Not implemented"); }
+
+	createTransportSocket(socket) { throw new Error("Not implemented"); }
 
 	attemptToConnect() {
 		if (!this.connecting) return;
 
 		if (ifLog(LOG_LEVELS.INFO)) this.log("attempting to connect to", chalk.magenta(`${this.host}:${this.port}`));
 
-		const socket = this.enhanceSocket(this.createSocket());
-		socket
-			.on("connect", () => {
-				this.socketDestroyedByStopCalled = false;
-
-				this.socket = socket;
-
-				this.connecting = false;
-			});
-	}
-
-	handleSocketOnError(error) {
-		let errorMessage = error.message;
-		if (error.code === "ECONNREFUSED") errorMessage = "connection refused";
-		else if (error.code === "ECONNRESET") errorMessage = "connection reset";
-		else if (error.code === "ETIMEDOUT") errorMessage = "connection timeout";
-
-		if (ifLog(LOG_LEVELS.INFO)) this.log("error", errorMessage);
+		this.socket = this.createSocket();
+		this.socket
+			.on("error", this.handleSocketOnError)
+			.on("close", this.handleSocketOnClose)
+			.on("connect", this.handleSocketOnConnect);
 	}
 
 	handleSocketOnClose() {
-		this.socket = null;
+		this.socket
+			.off("connect", this.handleSocketOnConnect);
+
+		super.handleSocketOnClose();
 
 		if (this.socketDestroyedByStopCalled) {
 			this.socketDestroyedByStopCalled = false;
@@ -1033,16 +1190,21 @@ class BufferSocketClientTransport extends BufferSocketTransport {
 		this.attemptToConnectTimeout = setTimeout(this.attemptToConnect, connectionAttemptTimeout);
 	}
 
-	printConnectedLog() {
-		if (ifLog(LOG_LEVELS.INFO)) this.log("connected", chalk.magenta(`${this.socket.localAddress}:${this.socket.localPort}`), "--", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
-	}
+	handleSocketOnConnect() {
+		this.socketDestroyedByStopCalled = false;
 
-	printDisconnectedLog() {
-		if (ifLog(LOG_LEVELS.INFO)) this.log("disconnected from", chalk.magenta(`${this.socket.remoteAddress}:${this.socket.remotePort}`));
+		this.socket
+			.off("error", this.handleSocketOnError)
+			.off("close", this.handleSocketOnClose)
+			.off("connect", this.handleSocketOnConnect);
+
+		this.transportSocket = this.createTransportSocket(this.socket);
+
+		this.connecting = false;
 	}
 }
 
-class TCPBufferSocketClientTransport extends BufferSocketClientTransport {
+class TCPClientTransport extends ClientTransport {
 	createLog() {
 		this.log = createLog("[transport]", "[tcp-socket]");
 	}
@@ -1051,69 +1213,79 @@ class TCPBufferSocketClientTransport extends BufferSocketClientTransport {
 		return net.connect(this.port, this.host);
 	}
 
-	enhanceSocket(socket) {
-		return super.enhanceSocket(enhanceTCPSocket(socket));
+	createTransportSocket(socket) {
+		return createTransportSocketForTCPSocket(socket, this.options);
 	}
 }
 
-function enhanceWebSocket(webSocket) {
-	webSocket.writeBuffer = buffer => {
-		const encryptedBuffer = symmetricBufferCipher.encrypt(buffer);
-		webSocket.send(encryptedBuffer);
-	};
-
-	webSocket.end = () => webSocket.close();
-	webSocket.destroy = () => webSocket.terminate();
-
-	webSocket.on("open", () => webSocket.emit("connect"));
-	webSocket.on("message", message => {
-		let decryptedBuffer;
-		try {
-			decryptedBuffer = symmetricBufferCipher.decrypt(message);
-
-			webSocket.emit("buffer", decryptedBuffer);
-		} catch {
-			webSocket.emit("error", new Error("Decryption error"));
-		}
-	});
-
+function patchWebSocket(webSocket) {
 	Object.defineProperty(webSocket, "localAddress", { get: () => webSocket._socket.localAddress });
 	Object.defineProperty(webSocket, "localPort", { get: () => webSocket._socket.localPort });
 	Object.defineProperty(webSocket, "remoteAddress", { get: () => webSocket._socket.remoteAddress });
 	Object.defineProperty(webSocket, "remotePort", { get: () => webSocket._socket.remotePort });
 
+	webSocket.on("open", () => webSocket.emit("connect"));
+	webSocket.destroy = () => webSocket.terminate();
+
 	return webSocket;
 }
 
-class WebSocketBufferSocketServerTransport extends BufferSocketServerTransport {
+function createTransportSocketForWebSocket(webSocket, options) {
+	const transportSocket = new TransportSocket({
+		write: data => transportSocket.webSocket.send(data),
+		...options
+	});
+
+	const onClose = () => {
+		transportSocket.webSocket.off("close", onClose);
+		transportSocket.webSocket.off("message", onMessage);
+
+		transportSocket.close();
+	};
+
+	const onMessage = message => transportSocket.handleOnData(message);
+
+	transportSocket.webSocket = webSocket;
+	transportSocket.webSocket
+		.on("close", onClose)
+		.on("message", onMessage);
+
+	return transportSocket;
+}
+
+class WebSocketServerTransport extends ServerTransport {
 	createLog() {
 		this.log = createLog("[transport]", "[ws-server]");
 	}
 
 	createServer() {
-		this.server = new ws.WebSocketServer({ host: ALL_INTERFACES, port: this.port });
+		this.server = new ws.WebSocketServer({ host: this.host, port: this.port });
 	}
 
 	listenServer(host) {
 		// listen called in WebSocketServer constructor
 	}
 
-	enhanceSocket(socket) {
-		return super.enhanceSocket(enhanceWebSocket(socket));
+	createTransportSocket(socket) {
+		return createTransportSocketForWebSocket(socket, this.options);
+	}
+
+	handleServerOnConnection(socket) {
+		super.handleServerOnConnection(patchWebSocket(socket));
 	}
 }
 
-class WebSocketBufferSocketClientTransport extends BufferSocketClientTransport {
+class WebSocketClientTransport extends ClientTransport {
 	createLog() {
 		this.log = createLog("[transport]", "[ws-socket]");
 	}
 
 	createSocket() {
-		return new ws.WebSocket(`ws://${this.host}:${this.port}`);
+		return patchWebSocket(new ws.WebSocket(`ws://${this.host}:${this.port}`));
 	}
 
-	enhanceSocket(socket) {
-		return super.enhanceSocket(enhanceWebSocket(socket));
+	createTransportSocket(socket) {
+		return createTransportSocketForWebSocket(socket, this.options);
 	}
 }
 
@@ -1137,13 +1309,13 @@ export default {
 		DirectOutputConnection
 	},
 	transports: {
-		BufferSocketServerTransport,
-		BufferSocketClientTransport,
+		ServerTransport,
+		ClientTransport,
 
-		TCPBufferSocketServerTransport,
-		TCPBufferSocketClientTransport,
+		TCPServerTransport,
+		TCPClientTransport,
 
-		WebSocketBufferSocketServerTransport,
-		WebSocketBufferSocketClientTransport
+		WebSocketServerTransport,
+		WebSocketClientTransport
 	}
 };

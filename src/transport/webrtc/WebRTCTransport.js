@@ -28,12 +28,12 @@ class WebRTCTransport extends ntun.Transport {
 	stop() {
 		super.stop();
 
-		if (this.socket) {
-			this.socket
+		if (this.transportSocket) {
+			this.transportSocket
 				.off("error", this.handleSocketOnError)
 				.off("writeBuffer", this.handleSocketOnWriteBuffer);
 
-			this.socket = null;
+			this.transportSocket = null;
 		}
 
 		this.destroyPeer();
@@ -162,31 +162,31 @@ class WebRTCTransport extends ntun.Transport {
 
 		this.peer = null;
 
-		if (this.socket) {
-			this.socket
+		if (this.transportSocket) {
+			this.transportSocket
 				.off("error", this.handleSocketOnError)
 				.off("writeBuffer", this.handleSocketOnWriteBuffer);
 
-			this.socket = null;
+			this.transportSocket = null;
 		}
 
 		if (this.workingState === ntun.WORKING_STATE.STOPPING) this.emitStopped();
 	}
 
 	handlePeerOnDataChannelOpened() {
-		this.socket = new TransportCipherBufferSocketWrapper();
-		this.socket
+		this.transportSocket = new TransportCipherBufferSocketWrapper();
+		this.transportSocket
 			.on("error", this.handleSocketOnError)
 			.on("writeBuffer", this.handleSocketOnWriteBuffer);
 	}
 
 	handlePeerOnDataChannelClosed() {
-		if (this.socket) {
-			this.socket
+		if (this.transportSocket) {
+			this.transportSocket
 				.off("error", this.handleSocketOnError)
 				.off("writeBuffer", this.handleSocketOnWriteBuffer);
 
-			this.socket = null;
+			this.transportSocket = null;
 		}
 	}
 
@@ -202,7 +202,7 @@ class WebRTCTransport extends ntun.Transport {
 		if (ifLog(LOG_LEVELS.DEBUG)) this.log("message");
 
 		const buffer = WebRTCPeer.arrayBufferToBuffer(message);
-		this.socket.pushBuffer(buffer);
+		this.transportSocket.pushBuffer(buffer);
 	}
 
 	handleSocketOnError(error) {

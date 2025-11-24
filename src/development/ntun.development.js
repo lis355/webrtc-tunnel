@@ -16,6 +16,7 @@ async function run() {
 	const transportPort = 8081;
 	const transportHost = "127.0.0.1";
 	const socks5InputConnectionPort = 8080;
+	const rateLimitBytesPerSecond = 31250; // 250 kbps / 0.25 mbps ~ slow 3g
 	let testClientConnectionAttempts = true;
 
 	const serverNode = new ntun.Node({ name: "out" });
@@ -31,16 +32,23 @@ async function run() {
 	global.clientNode = clientNode;
 	global.inConnection = clientNode.connection;
 
+	const transportOptions = {
+		rateLimit: {
+			bytesPerSecond: rateLimitBytesPerSecond
+		},
+		cipher: true
+	};
+
 	for (const transport of transports) {
 		switch (transport) {
 			case "tcp":
-				serverNode.transport = new ntun.transports.TCPBufferSocketServerTransport(transportPort);
-				clientNode.transport = new ntun.transports.TCPBufferSocketClientTransport(transportHost, transportPort);
+				serverNode.transport = new ntun.transports.TCPServerTransport({ port: transportPort, ...transportOptions });
+				clientNode.transport = new ntun.transports.TCPClientTransport({ host: transportHost, port: transportPort, ...transportOptions });
 				break;
 
 			case "ws":
-				serverNode.transport = new ntun.transports.WebSocketBufferSocketServerTransport(transportPort);
-				clientNode.transport = new ntun.transports.WebSocketBufferSocketClientTransport(transportHost, transportPort);
+				serverNode.transport = new ntun.transports.WebSocketServerTransport({ port: transportPort, ...transportOptions });
+				clientNode.transport = new ntun.transports.WebSocketClientTransport({ host: transportHost, port: transportPort, ...transportOptions });
 				break;
 
 			default:
@@ -74,7 +82,9 @@ async function run() {
 		await Promise.all([
 			new Promise(async resolve => {
 				clientNode.transport.stop();
-				// await timersPromises.setTimeout(5000);
+
+				await timersPromises.setTimeout(3000);
+
 				serverNode.transport.stop();
 
 				serverNode.stop();
