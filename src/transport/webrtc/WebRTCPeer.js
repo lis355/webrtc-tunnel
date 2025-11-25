@@ -178,7 +178,7 @@ export class WebRTCDataChannelPeer extends WebRTCPeer {
 	destroy() {
 		this.peerConnection.ondatachannel = null;
 
-		this.dataChannel.close();
+		if (this.dataChannel) this.dataChannel.close();
 
 		super.destroy();
 	}
@@ -222,13 +222,13 @@ export class WebRTCDataChannelPeer extends WebRTCPeer {
 	}
 
 	handleDataChannelOnMessage(message) {
-		if (ifLog(LOG_LEVELS.DEBUG)) log("handleDataChannelOnMessage", message);
+		if (ifLog(LOG_LEVELS.DEBUG)) log("handleDataChannelOnMessage", message.byteLength);
 
 		this.emit("dataChannelMessage", message);
 	}
 
 	sendDataChannelMessage(message) {
-		if (ifLog(LOG_LEVELS.DEBUG)) log("sendDataChannelMessage", message);
+		if (ifLog(LOG_LEVELS.DEBUG)) log("sendDataChannelMessage", message.byteLength);
 
 		this.dataChannel.send(message);
 	}

@@ -16,7 +16,6 @@ async function run() {
 	const joinId = getJoinId(process.env.DEVELOP_VK_JOIN_ID_OR_LINK);
 	const socks5InputConnectionPort = 8080;
 	const rateLimitBytesPerSecond = 31250; // 250 kbps / 0.25 mbps ~ slow 3g
-	const testClientConnectionAttempts = true;
 
 	const serverNode = new ntun.Node();
 	serverNode.connection = new ntun.outputConnections.DirectOutputConnection(serverNode);
@@ -48,7 +47,7 @@ async function run() {
 
 			clientNode.transport.start();
 
-			if (testClientConnectionAttempts) await timersPromises.setTimeout(5000);
+			await timersPromises.setTimeout(3000);
 
 			serverNode.transport.start();
 
@@ -84,7 +83,7 @@ async function run() {
 		new Promise(async resolve => {
 			clientNode.transport.stop();
 
-			if (testClientConnectionAttempts) await timersPromises.setTimeout(5000);
+			await timersPromises.setTimeout(5000);
 
 			serverNode.transport.stop();
 

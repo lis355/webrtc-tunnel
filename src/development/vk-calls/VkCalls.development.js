@@ -1,3 +1,5 @@
+import timersPromises from "timers/promises";
+
 import { config as dotenv } from "dotenv-flow";
 
 import { setLogLevel, LOG_LEVELS } from "../../utils/log.js";
@@ -45,7 +47,8 @@ async function run() {
 
 			clientNode.transport.start();
 
-			await new Promise(resolve => setTimeout(resolve, 3000));
+			await timersPromises.setTimeout(3000);
+
 			serverNode.transport.start();
 
 			return resolve();
@@ -64,7 +67,7 @@ async function run() {
 	clientNode.transport.stop();
 	await waits.waitForStopped(clientNode.transport);
 
-	// await new Promise(resolve => setTimeout(resolve, 30000));
+	// await timersPromises.setTimeout(3000);
 
 	clientNode.transport.start();
 
@@ -73,7 +76,7 @@ async function run() {
 		waits.waitForConnected(clientNode.transport)
 	]);
 
-	await new Promise(resolve => setTimeout(resolve, 3000));
+	await timersPromises.setTimeout(3000);
 
 	await exec(`curl -s -x socks5://127.0.0.1:${socks5InputConnectionPort} http://jdam.am:8302`);
 	await exec(`curl -s -x socks5://127.0.0.1:${socks5InputConnectionPort} https://jdam.am/api/ip`);

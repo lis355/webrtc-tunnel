@@ -17,7 +17,7 @@ async function run() {
 	const transportHost = "127.0.0.1";
 	const socks5InputConnectionPort = 8080;
 	const rateLimitBytesPerSecond = 31250; // 250 kbps / 0.25 mbps ~ slow 3g
-	let testClientConnectionAttempts = true;
+	const testClientConnectionAttempts = true;
 
 	const serverNode = new ntun.Node({ name: "out" });
 	serverNode.connection = new ntun.outputConnections.DirectOutputConnection(serverNode);

@@ -16,7 +16,7 @@ class WebRTCTransport extends ntun.Transport {
 		this.handlePeerOnDataChannelOpened = this.handlePeerOnDataChannelOpened.bind(this);
 		this.handlePeerOnDataChannelClosed = this.handlePeerOnDataChannelClosed.bind(this);
 		this.handlePeerOnDataChannelMessage = this.handlePeerOnDataChannelMessage.bind(this);
-		this.handleSocketOnError = this.handleSocketOnError.bind(this);
+		this.handleTransportSocketOnError = this.handleTransportSocketOnError.bind(this);
 	}
 
 	start() {
@@ -31,6 +31,10 @@ class WebRTCTransport extends ntun.Transport {
 		this.destroyTransportSocket();
 
 		this.destroyPeer();
+	}
+
+	startConnection() {
+		this.startWebRTCConnection();
 	}
 
 	createPeer() {
@@ -53,20 +57,22 @@ class WebRTCTransport extends ntun.Transport {
 	}
 
 	destroyPeer() {
-		this.peer
-			.off("connected", this.handlePeerOnConnected)
-			.off("dataChannelOpened", this.handlePeerOnDataChannelOpened)
-			.off("dataChannelClosed", this.handlePeerOnDataChannelClosed)
-			.off("dataChannelMessage", this.handlePeerOnDataChannelMessage);
+		if (this.peer) {
+			this.peer
+				.off("connected", this.handlePeerOnConnected)
+				.off("dataChannelOpened", this.handlePeerOnDataChannelOpened)
+				.off("dataChannelClosed", this.handlePeerOnDataChannelClosed)
+				.off("dataChannelMessage", this.handlePeerOnDataChannelMessage);
 
-		this.peer.destroy();
+			this.peer.destroy();
+		}
 	}
 
 	isPeerHasSomeRelayCandidate() {
 		return this.peer.iceCandidates.some(iceCandidate => iceCandidate.type === "relay");
 	}
 
-	async startConnection() {
+	async startWebRTCConnection() {
 		this.createPeer();
 
 		this.emitStarted();
@@ -158,13 +164,13 @@ class WebRTCTransport extends ntun.Transport {
 		});
 
 		this.transportSocket
-			.on("error", this.handleSocketOnError);
+			.on("error", this.handleTransportSocketOnError);
 	}
 
 	destroyTransportSocket() {
 		if (this.transportSocket) {
 			this.transportSocket
-				.off("error", this.handleSocketOnError);
+				.off("error", this.handleTransportSocketOnError);
 
 			this.transportSocket.close();
 
@@ -209,10 +215,10 @@ class WebRTCTransport extends ntun.Transport {
 		this.transportSocket.push(buffer);
 	}
 
-	handleSocketOnError(error) {
+	handleTransportSocketOnError(error) {
 		if (ifLog(LOG_LEVELS.INFO)) this.log("socket error", error.message);
 
-		this.stop();
+		this.destroyTransportSocket();
 	}
 }
 
@@ -229,8 +235,8 @@ class WebRTCPeerServerTransport extends WebRTCPeerTransport {
 		this.log = createLog("[transport]", "[webrtc-server]");
 	}
 
-	async startConnection() {
-		await super.startConnection();
+	async startWebRTCConnection() {
+		await super.startWebRTCConnection();
 
 		this.startOfferConnection();
 	}
@@ -241,8 +247,8 @@ class WebRTCPeerClientTransport extends WebRTCPeerTransport {
 		this.log = createLog("[transport]", "[webrtc-client]");
 	}
 
-	async startConnection() {
-		await super.startConnection();
+	async startWebRTCConnection() {
+		await super.startWebRTCConnection();
 
 		this.startAnswerConnection();
 	}

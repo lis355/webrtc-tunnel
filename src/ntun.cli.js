@@ -8,7 +8,6 @@ import { log, setLogLevel, LOG_LEVELS } from "./utils/log.js";
 import ntun from "./ntun.js";
 
 import VkTransport from "./transport/vk-calls/VkTransport.js";
-import WebRTCTransport from "./transport/webrtc/WebRTCTransport.js";
 
 import info from "../package.json" with { type: "json" };
 
@@ -38,7 +37,6 @@ function checkPort(port) {
 const TRANSPORT = {
 	TCP: "tcp",
 	WEBSOCKET: "ws",
-	WEBRTC: "webrtc",
 	VK_WEBRTC: "vk-webrtc",
 	VK_CALLS: "vk-calls"
 };
@@ -116,22 +114,6 @@ async function run() {
 				if (!checkPort(args.transport[1])) throw new Error("Invalid transport port");
 
 				node.transport = new ntun.transports.WebSocketBufferSocketServerTransport(args.transport[1]);
-			}
-
-			break;
-		}
-		case TRANSPORT.WEBRTC: {
-			let iceServers;
-			try {
-				iceServers = JSON.parse(args.transport[1]);
-			} catch {
-				throw new Error("Invalid ice servers json");
-			}
-
-			if (args.input) {
-				node.transport = new WebRTCTransport.WebRTCPeerClientTransport(iceServers);
-			} else if (args.output) {
-				node.transport = new WebRTCTransport.WebRTCPeerServerTransport(iceServers);
 			}
 
 			break;
