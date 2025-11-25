@@ -47,6 +47,8 @@ async function run() {
 
 	let offer, answer;
 
+	log("useSimpleSignalServer", useSimpleSignalServer);
+
 	serverNode.transport
 		.on("error", error => {
 			log(error.message);

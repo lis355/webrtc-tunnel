@@ -6,7 +6,7 @@ import { setLogLevel, LOG_LEVELS } from "../../utils/log.js";
 import getJoinId from "../../transport/vk-calls/getJoinId.js";
 import ntun from "../../ntun.js";
 import urlTests from "../urlTests.js";
-import VkWebRTCTransport from "../../transport/vk-calls/VkWebRTCTransport.js";
+import VkTransport from "../../transport/vk-calls/VkTransport.js";
 
 dotenv();
 
@@ -15,15 +15,31 @@ setLogLevel(LOG_LEVELS.INFO);
 async function run() {
 	const joinId = getJoinId(process.env.DEVELOP_VK_JOIN_ID_OR_LINK);
 	const socks5InputConnectionPort = 8080;
-	let testClientConnectionAttempts = true;
+	const rateLimitBytesPerSecond = 31250; // 250 kbps / 0.25 mbps ~ slow 3g
+	const testClientConnectionAttempts = true;
 
-	const serverNode = new ntun.Node({ name: "out" });
+	const serverNode = new ntun.Node();
 	serverNode.connection = new ntun.outputConnections.DirectOutputConnection(serverNode);
-	serverNode.transport = new VkWebRTCTransport(joinId);
 
-	const clientNode = new ntun.Node({ name: "in" });
+	const clientNode = new ntun.Node();
 	clientNode.connection = new ntun.inputConnections.Socks5InputConnection(clientNode, { port: socks5InputConnectionPort });
-	clientNode.transport = new VkWebRTCTransport(joinId);
+
+	global.setLogLevelInfo = () => setLogLevel(LOG_LEVELS.INFO);
+	global.setLogLevelDebug = () => setLogLevel(LOG_LEVELS.DEBUG);
+	global.serverNode = serverNode;
+	global.outConnection = serverNode.connection;
+	global.clientNode = clientNode;
+	global.inConnection = clientNode.connection;
+
+	const transportOptions = {
+		rateLimit: {
+			bytesPerSecond: rateLimitBytesPerSecond
+		},
+		cipher: true
+	};
+
+	serverNode.transport = new VkTransport.VkWebRTCTransport({ joinId, ...transportOptions });
+	clientNode.transport = new VkTransport.VkWebRTCTransport({ joinId, ...transportOptions });
 
 	await Promise.all([
 		new Promise(async resolve => {
@@ -67,7 +83,9 @@ async function run() {
 	await Promise.all([
 		new Promise(async resolve => {
 			clientNode.transport.stop();
-			// await timersPromises.setTimeout(5000);
+
+			if (testClientConnectionAttempts) await timersPromises.setTimeout(5000);
+
 			serverNode.transport.stop();
 
 			serverNode.stop();
