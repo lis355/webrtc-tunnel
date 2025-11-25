@@ -57,6 +57,16 @@
 		{
 			"type": "node",
 			"request": "launch",
+			"name": "dev/ya-telemost-webrtc",
+			"skipFiles": [
+				"<node_internals>/**"
+			],
+			"program": "${workspaceFolder}/src/development/ya-telemost/YandexTelemostWebRTC.development.js",
+			"console": "integratedTerminal"
+		},
+		{
+			"type": "node",
+			"request": "launch",
 			"name": "ntun.cli",
 			"skipFiles": [
 				"<node_internals>/**"
