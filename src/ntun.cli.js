@@ -31,13 +31,9 @@ function printLogo() {
 }
 
 function checkHost(host) {
-	try {
-		new URL(host);
-
-		return true;
-	} catch {
-		return false;
-	}
+	return typeof host === "string" &&
+		host.length > 0 &&
+		/^[a-zA-Z0-9.-]+$/.test(host);
 }
 
 function checkPort(port) {
